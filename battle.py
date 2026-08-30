@@ -818,13 +818,11 @@ class AnimatorBattle:
 
             "completed": match.completed,
         }
-```
 
 ### One important change in `main.py`
 
 You **must also remove** this entire section from the `battle_command`:
 
-```python
 # ========================================================
 # PARTICIPANTS
 # ========================================================
