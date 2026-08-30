@@ -1,6 +1,9 @@
+```python
 import os
 from dotenv import load_dotenv
 
+# Load .env when running locally.
+# On Railway, DISCORD_TOKEN comes from Railway Variables.
 load_dotenv()
 
 # ============================================================
@@ -10,7 +13,10 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 if not DISCORD_TOKEN:
-    raise RuntimeError("DISCORD_TOKEN is missing from .env")
+    raise RuntimeError(
+        "DISCORD_TOKEN is missing. "
+        "Set it in your local .env file or Railway Variables."
+    )
 
 
 # ============================================================
@@ -51,3 +57,4 @@ VIDEO_EXTENSIONS = {
 
 # Don't allow the same clip to be used twice
 NO_DUPLICATE_CLIPS = True
+```
