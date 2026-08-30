@@ -1,3 +1,4 @@
+```python
 from dataclasses import dataclass
 from typing import Optional
 import random
@@ -95,19 +96,18 @@ class AnimatorBattle:
     """
     Tournament manager.
 
-    IMPORTANT:
-
     This class does NOT search Sakugabooru.
 
-    The Sakugabooru client is responsible for finding:
+    Sakugabooru is responsible for:
         animator -> clips
 
-    This class is responsible only for:
+    This class handles:
         participants
         matches
         winners
         losers
         champion
+        tournament progression
         /stop
     """
 
@@ -135,7 +135,10 @@ class AnimatorBattle:
         self.animators = animators
         self.mode = mode
 
+        # ----------------------------------------------------
         # Match counter
+        # ----------------------------------------------------
+
         self.match_counter = 0
 
         # ----------------------------------------------------
@@ -202,14 +205,12 @@ class AnimatorBattle:
         if self.stopped:
             return None
 
-        match = Match(
+        return Match(
             match_id=self.next_match_id(),
             animator_a=animator_a,
             animator_b=animator_b,
             bracket=bracket,
         )
-
-        return match
 
     # ========================================================
     # START TOURNAMENT
@@ -221,7 +222,7 @@ class AnimatorBattle:
             return []
 
         if self.started:
-            return self.get_pending_matches()
+            return self.next_matches()
 
         self.started = True
 
@@ -237,7 +238,7 @@ class AnimatorBattle:
         self.match_queue.clear()
 
         # ----------------------------------------------------
-        # Create opening round
+        # Create opening matches
         # ----------------------------------------------------
 
         while len(participants) >= 2:
@@ -264,13 +265,40 @@ class AnimatorBattle:
                 participants[0]
             )
 
-        return self.get_pending_matches()
+        return self.next_matches()
 
     # ========================================================
     # GET PENDING MATCHES
     # ========================================================
 
     def get_pending_matches(self):
+
+        if self.stopped:
+            return []
+
+        return self.match_queue.copy()
+
+    # ========================================================
+    # NEXT MATCHES
+    # ========================================================
+
+    def next_matches(self):
+
+        """
+        Return all matches currently waiting in the queue.
+
+        This method exists because main.py processes an entire
+        round at a time:
+
+            matches = tournament.start()
+
+            ...
+
+            matches = tournament.next_matches()
+
+        It also prevents the missing-attribute error:
+            AnimatorBattle has no attribute 'next_matches'
+        """
 
         if self.stopped:
             return []
@@ -303,6 +331,17 @@ class AnimatorBattle:
         return None
 
     # ========================================================
+    # MANUAL NEXT MATCH
+    # ========================================================
+
+    def next_match(self):
+
+        if self.stopped:
+            return None
+
+        return self.get_next_match()
+
+    # ========================================================
     # RECORD RESULT
     # ========================================================
 
@@ -318,12 +357,21 @@ class AnimatorBattle:
         if match.completed:
             return False
 
-        # Make sure this is actually the active match.
+        # ----------------------------------------------------
+        # Make sure this is the active match.
+        #
+        # main.py processes matches directly from the queue,
+        # so current_match may be None here.
+        #
+        # Therefore we only validate it when one exists.
+        # ----------------------------------------------------
+
         if (
             self.current_match is not None
             and match.match_id
             != self.current_match.match_id
         ):
+
             raise ValueError(
                 "This is not the current battle match."
             )
@@ -333,6 +381,7 @@ class AnimatorBattle:
         loser = match.loser
 
         if loser is None:
+
             raise RuntimeError(
                 "Match has no loser."
             )
@@ -386,10 +435,16 @@ class AnimatorBattle:
         self.current_match = None
 
         # ----------------------------------------------------
-        # Build next stage
+        # IMPORTANT:
+        #
+        # Only prepare another stage when the current queue
+        # has completely finished.
         # ----------------------------------------------------
 
-        if self.phase != "Finished":
+        if (
+            self.phase != "Finished"
+            and not self.match_queue
+        ):
 
             self.prepare_next_round()
 
@@ -405,7 +460,7 @@ class AnimatorBattle:
             return
 
         # ----------------------------------------------------
-        # Existing queued matches
+        # Do not build another round while matches are queued.
         # ----------------------------------------------------
 
         if self.match_queue:
@@ -418,6 +473,19 @@ class AnimatorBattle:
         if len(self.winners) >= 2:
 
             self.build_winners_round()
+
+            return
+
+        # ----------------------------------------------------
+        # If only one winner remains, check losers.
+        # ----------------------------------------------------
+
+        if (
+            len(self.winners) == 1
+            and len(self.losers) >= 2
+        ):
+
+            self.build_losers_round()
 
             return
 
@@ -460,6 +528,7 @@ class AnimatorBattle:
             )
 
             if match:
+
                 self.match_queue.append(
                     match
                 )
@@ -517,7 +586,10 @@ class AnimatorBattle:
                     match
                 )
 
+        # ----------------------------------------------------
         # Automatic advancement
+        # ----------------------------------------------------
+
         if participants:
 
             self.winners.append(
@@ -567,7 +639,10 @@ class AnimatorBattle:
                     match
                 )
 
+        # ----------------------------------------------------
         # Automatic advancement
+        # ----------------------------------------------------
+
         if participants:
 
             self.losers.append(
@@ -606,17 +681,6 @@ class AnimatorBattle:
             )
 
     # ========================================================
-    # MANUAL NEXT MATCH
-    # ========================================================
-
-    def next_match(self):
-
-        if self.stopped:
-            return None
-
-        return self.get_next_match()
-
-    # ========================================================
     # CHECK FINISHED
     # ========================================================
 
@@ -636,12 +700,7 @@ class AnimatorBattle:
         """
         Completely terminate the tournament.
 
-        This is what /stop should call.
-
-        It does NOT mean:
-            stop voting for the current round.
-
-        It means:
+        This means:
             END THE ENTIRE GAME.
         """
 
@@ -760,3 +819,36 @@ class AnimatorBattle:
 
             "completed": match.completed,
         }
+```
+
+### One important change in `main.py`
+
+You **must also remove** this entire section from the `battle_command`:
+
+```python
+# ========================================================
+# PARTICIPANTS
+# ========================================================
+
+participant_lines = "\n".join(
+    f"• **{display_name(a.name)}**"
+    for a in animators
+)
+
+await interaction.channel.send(
+    "👥 **Battle participants**\n"
+    + participant_lines
+)
+```
+
+That's what produces:
+
+```text
+👥 Battle participants
+• satomi miyazaki
+• the ninth jedi (2026)
+```
+
+After removing it, the battle will go straight to the **ANIMATOR BATTLE STARTING!** message.
+
+**The `next_matches()` addition fixes the exact error you showed.**
