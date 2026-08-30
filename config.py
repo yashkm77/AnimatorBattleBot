@@ -1,4 +1,3 @@
-```python
 import os
 from dotenv import load_dotenv
 
@@ -57,4 +56,4 @@ VIDEO_EXTENSIONS = {
 
 # Don't allow the same clip to be used twice
 NO_DUPLICATE_CLIPS = True
-```
+
