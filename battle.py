@@ -1,4 +1,3 @@
-```python
 from dataclasses import dataclass
 from typing import Optional
 import random
@@ -839,16 +838,3 @@ await interaction.channel.send(
     "👥 **Battle participants**\n"
     + participant_lines
 )
-```
-
-That's what produces:
-
-```text
-👥 Battle participants
-• satomi miyazaki
-• the ninth jedi (2026)
-```
-
-After removing it, the battle will go straight to the **ANIMATOR BATTLE STARTING!** message.
-
-**The `next_matches()` addition fixes the exact error you showed.**
