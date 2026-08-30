@@ -819,20 +819,4 @@ class AnimatorBattle:
             "completed": match.completed,
         }
 
-### One important change in `main.py`
 
-You **must also remove** this entire section from the `battle_command`:
-
-# ========================================================
-# PARTICIPANTS
-# ========================================================
-
-participant_lines = "\n".join(
-    f"• **{display_name(a.name)}**"
-    for a in animators
-)
-
-await interaction.channel.send(
-    "👥 **Battle participants**\n"
-    + participant_lines
-)
