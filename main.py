@@ -334,7 +334,6 @@ async def get_clips_for_match(
     return clip_a, clip_b
 
 
-```python
 # ============================================================
 # RUN MATCH — CLEAN DISPLAY
 # ============================================================
