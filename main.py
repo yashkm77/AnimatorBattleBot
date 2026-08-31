@@ -1,7 +1,7 @@
 import asyncio
 import random
-
 import discord
+
 from discord import app_commands
 from discord.ext import commands
 
@@ -53,10 +53,18 @@ bot = AnimatorBattleBot()
 # DISPLAY NAME
 # ============================================================
 
-def display_name(name: str) -> str:
+def display_name(
+    name: str,
+):
+
+    if not isinstance(
+        name,
+        str,
+    ):
+        return "Unknown Animator"
 
     return (
-        str(name)
+        name
         .replace("_", " ")
         .strip()
     )
@@ -66,7 +74,9 @@ def display_name(name: str) -> str:
 # VOTING VIEW
 # ============================================================
 
-class BattleVoteView(discord.ui.View):
+class BattleVoteView(
+    discord.ui.View
+):
 
     def __init__(
         self,
@@ -95,7 +105,7 @@ class BattleVoteView(discord.ui.View):
     # ========================================================
 
     @discord.ui.button(
-        label="Vote",
+        label="Vote A",
         style=discord.ButtonStyle.primary,
     )
     async def vote_a(
@@ -114,7 +124,9 @@ class BattleVoteView(discord.ui.View):
             user_id
         )
 
-        self.voter_choices[user_id] = (
+        self.voter_choices[
+            user_id
+        ] = (
             interaction.user.display_name,
             self.animator_a.name,
         )
@@ -138,7 +150,7 @@ class BattleVoteView(discord.ui.View):
     # ========================================================
 
     @discord.ui.button(
-        label="Vote",
+        label="Vote B",
         style=discord.ButtonStyle.secondary,
     )
     async def vote_b(
@@ -157,7 +169,9 @@ class BattleVoteView(discord.ui.View):
             user_id
         )
 
-        self.voter_choices[user_id] = (
+        self.voter_choices[
+            user_id
+        ] = (
             interaction.user.display_name,
             self.animator_b.name,
         )
@@ -183,10 +197,11 @@ class BattleVoteView(discord.ui.View):
     def disable_buttons(self):
 
         for child in self.children:
+
             child.disabled = True
 
     # ========================================================
-    # INACTIVITY LIMIT
+    # INACTIVITY
     # ========================================================
 
     def get_inactivity_limit(self):
@@ -220,18 +235,17 @@ class BattleVoteView(discord.ui.View):
                 asyncio.get_running_loop().time()
             )
 
-            total_time = (
+            elapsed = (
                 now - start_time
             )
 
-            if total_time >= VOTE_TIME:
+            if elapsed >= VOTE_TIME:
                 break
 
             if not self.voter_choices:
 
                 remaining = (
-                    VOTE_TIME
-                    - total_time
+                    VOTE_TIME - elapsed
                 )
 
                 try:
@@ -254,8 +268,7 @@ class BattleVoteView(discord.ui.View):
             if inactivity_limit is None:
 
                 remaining = (
-                    VOTE_TIME
-                    - total_time
+                    VOTE_TIME - elapsed
                 )
 
             else:
@@ -269,10 +282,7 @@ class BattleVoteView(discord.ui.View):
                     now - last_vote
                 )
 
-                if (
-                    inactivity
-                    >= inactivity_limit
-                ):
+                if inactivity >= inactivity_limit:
                     break
 
                 inactivity_remaining = (
@@ -282,7 +292,7 @@ class BattleVoteView(discord.ui.View):
 
                 total_remaining = (
                     VOTE_TIME
-                    - total_time
+                    - elapsed
                 )
 
                 remaining = min(
@@ -325,11 +335,14 @@ async def get_clips_for_match(
         mode,
     )
 
-    return clip_a, clip_b
+    return (
+        clip_a,
+        clip_b,
+    )
 
 
 # ============================================================
-# RUN ONE MATCH
+# RUN MATCH
 # ============================================================
 
 async def run_match(
@@ -337,6 +350,7 @@ async def run_match(
     tournament,
     sakuga,
     match,
+    match_number,
 ):
 
     name_a = display_name(
@@ -351,11 +365,13 @@ async def run_match(
     # GET CLIPS
     # ========================================================
 
-    clip_a, clip_b = await get_clips_for_match(
-        sakuga,
-        match.animator_a,
-        match.animator_b,
-        tournament.mode,
+    clip_a, clip_b = (
+        await get_clips_for_match(
+            sakuga,
+            match.animator_a,
+            match.animator_b,
+            tournament.mode,
+        )
     )
 
     if clip_a is None:
@@ -384,7 +400,7 @@ async def run_match(
     match.animator_b.current_clip = clip_b
 
     # ========================================================
-    # VIEW
+    # VOTE VIEW
     # ========================================================
 
     view = BattleVoteView(
@@ -399,33 +415,30 @@ async def run_match(
     # HEADER
     # ========================================================
 
-    match_number = match.match_id
-
     await interaction.channel.send(
         f"⚔️ **ANIMATOR BATTLE — MATCH "
-        f"{match_number}/{tournament.rounds}**"
+        f"{match_number}**\n"
+        f"**{name_a} vs {name_b}**"
     )
 
     # ========================================================
-    # IMPORTANT:
-    #
-    # We do NOT reveal the anime.
-    #
-    # We also don't need to send the animator name beside
-    # the clip if the purpose is to vote on the clips.
-    # The buttons already identify the animator.
+    # CLIP A
     # ========================================================
 
     await interaction.channel.send(
-        "🎬 **CLIP A**"
+        f"🎬 **{name_a}**"
     )
 
     await interaction.channel.send(
         clip_a["url"]
     )
 
+    # ========================================================
+    # CLIP B
+    # ========================================================
+
     await interaction.channel.send(
-        "🎬 **CLIP B**"
+        f"🎬 **{name_b}**"
     )
 
     await interaction.channel.send(
@@ -438,9 +451,7 @@ async def run_match(
 
     await interaction.channel.send(
         f"🗳️ **Vote for the better clip!**\n"
-        f"⏱️ **{VOTE_TIME} seconds**\n\n"
-        f"**A:** {name_a}\n"
-        f"**B:** {name_b}"
+        f"⏱️ **{VOTE_TIME} seconds**"
     )
 
     await interaction.channel.send(
@@ -482,28 +493,44 @@ async def run_match(
             ]
         )
 
-        tie = True
+        tie_message = (
+            "🤝 **Tie! Random winner selected.**"
+        )
 
     elif votes_a > votes_b:
 
         winner = match.animator_a
 
-        tie = False
+        tie_message = None
 
     else:
 
         winner = match.animator_b
 
-        tie = False
+        tie_message = None
 
     # ========================================================
-    # RECORD
+    # RECORD RESULT
     # ========================================================
 
-    tournament.record_result(
-        match,
-        winner,
-    )
+    try:
+
+        tournament.record_result(
+            match,
+            winner,
+        )
+
+    except Exception as e:
+
+        print(
+            f"Failed to record battle result: {e}"
+        )
+
+        await interaction.channel.send(
+            "❌ Failed to record the match result."
+        )
+
+        return False
 
     # ========================================================
     # RESULT
@@ -513,73 +540,23 @@ async def run_match(
         winner.name
     )
 
-    if tie:
+    result_text = (
+        f"🏆 **{winner_name} wins!**\n\n"
+        f"**{name_a}** — {votes_a} vote(s)\n"
+        f"**{name_b}** — {votes_b} vote(s)"
+    )
+
+    if tie_message:
 
         result_text = (
-            f"⚖️ **It's a tie!**\n"
-            f"🎲 Randomly selected winner: "
-            f"**{winner_name}**"
-        )
-
-    else:
-
-        result_text = (
-            f"🏆 **{winner_name} wins!**"
+            tie_message
+            + "\n\n"
+            + result_text
         )
 
     await interaction.channel.send(
         result_text
     )
-
-    # ========================================================
-    # SCORE
-    # ========================================================
-
-    await interaction.channel.send(
-        f"🗳️ **Final votes**\n"
-        f"• **{name_a}:** {votes_a}\n"
-        f"• **{name_b}:** {votes_b}"
-    )
-
-    # ========================================================
-    # REVEAL ANIME
-    # ========================================================
-
-    anime_a = await sakuga.find_anime_from_clip(
-        clip_a
-    )
-
-    anime_b = await sakuga.find_anime_from_clip(
-        clip_b
-    )
-
-    reveal_lines = []
-
-    if anime_a:
-
-        reveal_lines.append(
-            f"🎞️ **{name_a}:** {anime_a}"
-        )
-
-    if anime_b:
-
-        reveal_lines.append(
-            f"🎞️ **{name_b}:** {anime_b}"
-        )
-
-    if reveal_lines:
-
-        await interaction.channel.send(
-            "🔓 **Match information revealed**\n"
-            + "\n".join(reveal_lines)
-        )
-
-    else:
-
-        await interaction.channel.send(
-            "🔓 **Match information revealed**\n"
-            "Anime information wasn't available."
-        )
 
     # ========================================================
     # VOTERS
@@ -616,7 +593,7 @@ async def run_match(
 
 
 # ============================================================
-# RUN BATTLE
+# RUN TOURNAMENT
 # ============================================================
 
 async def run_tournament(
@@ -625,16 +602,24 @@ async def run_tournament(
     sakuga,
 ):
 
-    matches = tournament.start()
+    # --------------------------------------------------------
+    # Start.
+    # --------------------------------------------------------
 
-    # ========================================================
-    # EXACT NUMBER OF MATCHES
-    # ========================================================
+    matches = tournament.start()
 
     while matches:
 
         if tournament.stopped:
             return
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # We use the exact list returned for this round.
+        # Results create the NEXT round only after every
+        # current match has completed.
+        # ----------------------------------------------------
 
         for match in matches:
 
@@ -646,6 +631,7 @@ async def run_tournament(
                 tournament,
                 sakuga,
                 match,
+                match.match_id,
             )
 
             if not success:
@@ -657,25 +643,33 @@ async def run_tournament(
             await asyncio.sleep(1)
 
         # ----------------------------------------------------
-        # Important:
-        #
-        # record_result() does NOT generate another bracket.
-        # next_matches() only returns anything that was already
-        # queued.
+        # Champion check BEFORE requesting another round.
+        # ----------------------------------------------------
+
+        if tournament.is_finished():
+
+            break
+
+        # ----------------------------------------------------
+        # Get next round.
         # ----------------------------------------------------
 
         matches = tournament.next_matches()
 
     # ========================================================
-    # FINISHED
+    # CHAMPION
     # ========================================================
 
-    if tournament.is_finished():
+    if tournament.champion:
+
+        champion_name = display_name(
+            tournament.champion.name
+        )
 
         await interaction.channel.send(
-            f"🏁 **ANIMATOR BATTLE FINISHED!**\n\n"
-            f"Completed **{tournament.completed_match_count}"
-            f"/{tournament.rounds} matches**."
+            f"🏆 **ANIMATOR BATTLE CHAMPION**\n\n"
+            f"## 🏆 {champion_name}\n\n"
+            f"Congratulations!"
         )
 
 
@@ -688,7 +682,7 @@ async def run_tournament(
     description="Start an animator battle.",
 )
 @app_commands.describe(
-    rounds="Number of matches (1-16)",
+    rounds="Number of animators (2, 4, 8 or 16)",
     mode="Clip mode",
 )
 @app_commands.choices(
@@ -705,11 +699,29 @@ async def run_tournament(
 )
 async def battle_command(
     interaction: discord.Interaction,
-    rounds: app_commands.Range[int, 1, 16],
+    rounds: app_commands.Range[int, 2, 16],
     mode: app_commands.Choice[str],
 ):
 
     guild_id = interaction.guild_id
+
+    # ========================================================
+    # VALIDATE SIZE
+    # ========================================================
+
+    if rounds not in (
+        2,
+        4,
+        8,
+        16,
+    ):
+
+        await interaction.response.send_message(
+            "❌ Choose **2, 4, 8, or 16** animators.",
+            ephemeral=True,
+        )
+
+        return
 
     # ========================================================
     # ACTIVE BATTLE
@@ -726,36 +738,30 @@ async def battle_command(
         return
 
     # ========================================================
-    # IMPORTANT:
-    #
-    # We need TWO UNIQUE ANIMATORS PER MATCH.
-    #
-    # 2 rounds = 4 animators
-    # 4 rounds = 8 animators
-    # etc.
+    # CREATE CLIENT
     # ========================================================
-
-    animator_count = rounds * 2
 
     sakuga = SakugabooruClient()
 
     # ========================================================
-    # START SEARCH
+    # RESPONSE
     # ========================================================
 
     await interaction.response.send_message(
-        "🔎 **Searching the animator database "
-        "and Sakugabooru...**"
+        "🔎 **Finding popular animators on "
+        "Sakugabooru...**"
     )
 
     # ========================================================
-    # GET POPULAR/VERIFIED ANIMATORS
+    # CHOOSE PARTICIPANTS
     # ========================================================
 
     try:
 
-        candidates = await sakuga.choose_battle_animators(
-            animator_count
+        candidates = (
+            await sakuga.choose_battle_animators(
+                rounds
+            )
         )
 
     except Exception as e:
@@ -765,7 +771,8 @@ async def battle_command(
         )
 
         await interaction.channel.send(
-            "❌ Failed to select animators."
+            "❌ Failed to find animators "
+            "from Sakugabooru."
         )
 
         sakuga.reset()
@@ -776,14 +783,13 @@ async def battle_command(
     # NOT ENOUGH
     # ========================================================
 
-    if len(candidates) < animator_count:
+    if len(candidates) < rounds:
 
         await interaction.channel.send(
             f"❌ I could only find "
-            f"**{len(candidates)}** verified animators "
-            f"with usable Sakugabooru clips.\n\n"
-            f"**{animator_count}** are required for "
-            f"**{rounds} matches**."
+            f"**{len(candidates)}** verified "
+            f"animators with usable video clips, "
+            f"but the battle needs **{rounds}**."
         )
 
         sakuga.reset()
@@ -802,8 +808,11 @@ async def battle_command(
             name=candidate["name"],
             popularity=float(
                 candidate.get(
-                    "quality",
-                    0,
+                    "popularity",
+                    candidate.get(
+                        "quality",
+                        0,
+                    ),
                 )
             ),
         )
@@ -813,13 +822,12 @@ async def battle_command(
         )
 
     # ========================================================
-    # CREATE BATTLE
+    # TOURNAMENT
     # ========================================================
 
     tournament = AnimatorBattle(
         animators,
         mode=mode.value,
-        rounds=rounds,
     )
 
     bot.active_battles[
@@ -828,30 +836,35 @@ async def battle_command(
 
     # ========================================================
     # PARTICIPANTS
+    #
+    # IMPORTANT:
+    # ONLY animator names are displayed.
+    #
+    # No anime title.
+    # No Sakugabooru tag.
+    # No clip.
     # ========================================================
 
     participant_lines = "\n".join(
-        f"• **{display_name(a.name)}**"
-        for a in animators
+        f"• **{display_name(animator.name)}**"
+        for animator in animators
     )
 
     await interaction.channel.send(
-        f"👥 **Battle participants**\n"
-        f"{participant_lines}"
+        "👥 **Battle participants**\n\n"
+        + participant_lines
     )
 
     # ========================================================
-    # STARTING MESSAGE
+    # START MESSAGE
     # ========================================================
 
     await interaction.channel.send(
         "⚔️ **ANIMATOR BATTLE STARTING!**\n\n"
-        f"🎯 **{rounds} matches**\n"
-        f"👥 **{animator_count} animators**\n"
+        f"👥 **{rounds} animators**\n"
         f"🎬 **{mode.name}**\n"
         f"⏱️ **{VOTE_TIME} seconds per match**\n\n"
-        "Anime information will be revealed "
-        "**after each match**."
+        "Get ready..."
     )
 
     # ========================================================
@@ -876,11 +889,16 @@ async def battle_command(
 
         await interaction.channel.send(
             "❌ Something went wrong during "
-            "the animator battle.\n"
-            f"```{e}```"
+            "the animator battle."
+        )
+
+        print(
+            repr(e)
         )
 
     finally:
+
+        tournament.stop()
 
         sakuga.reset()
 
@@ -942,7 +960,7 @@ async def on_ready():
         "========================================"
     )
     print(
-        "      ANIMATOR BATTLE BOT"
+        "        ANIMATOR BATTLE BOT"
     )
     print(
         "========================================"
