@@ -52,8 +52,8 @@ class Match:
     # Round 2
     # Round 3
     # Final
-    #
-    bracket is assigned automatically.
+    
+    # bracket is assigned automatically.
     bracket: str = "Round 1"
 
     votes_a: int = 0
