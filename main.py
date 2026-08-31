@@ -504,8 +504,12 @@ async def run_match(
     )
 
     # ========================================================
-    # VOTERS
+    # VOTES
     # ========================================================
+
+    await interaction.channel.send(
+        f"🗳️ **Votes: {name_a} {votes_a} — {name_b} {votes_b}**"
+    )
 
     if view.voter_choices:
 
@@ -522,20 +526,24 @@ async def run_match(
             )
 
         await interaction.channel.send(
-            "🗳️ **Votes**\n\n"
-            + "\n".join(
-                voter_lines
-            )
+            "\n".join(voter_lines)
         )
 
     else:
 
         await interaction.channel.send(
-            "🗳️ **No votes were cast.**"
+            "• **No votes were cast.**"
         )
 
-    return True
+    # ========================================================
+    # SEPARATOR BEFORE NEXT MATCH
+    # ========================================================
 
+    await interaction.channel.send(
+        "──────────────"
+    )
+
+    return True
 
 # ============================================================
 # RUN TOURNAMENT
