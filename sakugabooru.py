@@ -1,511 +1,929 @@
-import aiohttp
 import asyncio
-import json
-import os
+import aiohttp
 import random
-import urllib.parse
+import re
+from urllib.parse import quote
 
+
+# ============================================================
+# CONFIG
+# ============================================================
 
 BASE_URL = "https://www.sakugabooru.com"
 
-ANIMATOR_INDEX_FILE = "animator_index.json"
+POST_API = f"{BASE_URL}/post.json"
 
-POOL_CACHE_FILE = "verified_animators.json"
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    "Version/26.0 Safari/605.1.15"
+)
 
-VERIFY_PAGES = 3
+HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "application/json,text/plain,*/*",
+}
 
-POSTS_PER_PAGE = 100
+REQUEST_TIMEOUT = 20
 
-REQUEST_CONCURRENCY = 5
+MAX_POST_PAGES = 3000
 
-MAX_503_RETRIES = 3
+VIDEO_EXTENSIONS = {
+    "mp4",
+    "webm",
+}
 
+# Tags that are clearly not animator names.
+# These are filtered when discovering candidates.
+IGNORED_TAGS = {
+    "1girl",
+    "1boy",
+    "2girls",
+    "2boys",
+    "3girls",
+    "3boys",
+    "4girls",
+    "4boys",
+    "5girls",
+    "5boys",
+    "6girls",
+    "6boys",
+    "7girls",
+    "7boys",
+    "8girls",
+    "8boys",
+
+    "male",
+    "female",
+    "solo",
+    "duo",
+    "group",
+    "multiple_girls",
+    "multiple_boys",
+
+    "animated",
+    "animation",
+    "anime",
+    "manga",
+
+    "character",
+    "characters",
+    "background",
+    "landscape",
+    "scenery",
+
+    "screenshot",
+    "official_art",
+    "promotional_art",
+    "cover",
+
+    "video",
+    "gif",
+    "sound",
+    "music",
+
+    "text",
+    "english_text",
+    "japanese_text",
+
+    "school_uniform",
+    "uniform",
+    "school",
+
+    "long_hair",
+    "short_hair",
+    "black_hair",
+    "brown_hair",
+    "blonde_hair",
+    "blue_hair",
+    "red_hair",
+    "pink_hair",
+    "green_hair",
+    "purple_hair",
+    "white_hair",
+
+    "blue_eyes",
+    "brown_eyes",
+    "green_eyes",
+    "red_eyes",
+    "purple_eyes",
+
+    "weapon",
+    "sword",
+    "gun",
+
+    "day",
+    "night",
+    "indoors",
+    "outdoors",
+
+    "simple_background",
+    "gradient_background",
+
+    "reflection",
+    "water",
+    "sky",
+    "cloud",
+
+    "comic",
+    "illustration",
+    "art",
+}
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def normalize_name(name: str) -> str:
+    """
+    Convert a Sakugabooru tag into a readable animator name.
+
+    Example:
+
+        yutaka_nakamura
+        ->
+        Yutaka Nakamura
+    """
+
+    if not name:
+        return ""
+
+    name = name.strip()
+
+    name = name.replace("_", " ")
+
+    name = re.sub(
+        r"\s+",
+        " ",
+        name,
+    )
+
+    return name.strip()
+
+
+def normalize_tag(tag: str) -> str:
+    """
+    Normalize a Sakugabooru tag.
+    """
+
+    if not tag:
+        return ""
+
+    tag = tag.strip().lower()
+
+    tag = tag.replace(" ", "_")
+
+    tag = re.sub(
+        r"_+",
+        "_",
+        tag,
+    )
+
+    return tag
+
+
+def is_video_post(post: dict) -> bool:
+    """
+    Check whether a Sakugabooru post is a usable video.
+    """
+
+    if not isinstance(post, dict):
+        return False
+
+    file_url = post.get("file_url")
+
+    if not file_url:
+        return False
+
+    extension = post.get("file_ext")
+
+    if extension:
+        extension = extension.lower().lstrip(".")
+
+        if extension in VIDEO_EXTENSIONS:
+            return True
+
+    # Fallback to URL extension.
+    url = file_url.lower()
+
+    return (
+        url.endswith(".mp4")
+        or url.endswith(".webm")
+    )
+
+
+def post_url(post: dict) -> str | None:
+    """
+    Get the direct media URL from a post.
+    """
+
+    if not isinstance(post, dict):
+        return None
+
+    url = post.get("file_url")
+
+    if not url:
+        return None
+
+    return url
+
+
+def extract_tags(post: dict) -> list[str]:
+    """
+    Extract tags from a Sakugabooru post.
+
+    Sakugabooru normally provides tags as one space-separated
+    string.
+    """
+
+    tags = post.get("tags", "")
+
+    if isinstance(tags, list):
+        return [
+            normalize_tag(str(tag))
+            for tag in tags
+            if tag
+        ]
+
+    if not isinstance(tags, str):
+        return []
+
+    return [
+        normalize_tag(tag)
+        for tag in tags.split()
+        if tag
+    ]
+
+
+def looks_like_animator_tag(tag: str) -> bool:
+    """
+    Try to determine whether a tag could be an animator name.
+
+    This is intentionally conservative.
+
+    It rejects obvious character/anime/general tags,
+    while allowing names such as:
+
+        yutaka_nakamura
+        keiichiro_watanabe
+        weilin_zhang
+    """
+
+    tag = normalize_tag(tag)
+
+    if not tag:
+        return False
+
+    if tag in IGNORED_TAGS:
+        return False
+
+    # Avoid extremely short tags.
+    if len(tag) < 5:
+        return False
+
+    # Animator tags normally contain an underscore.
+    if "_" not in tag:
+        return False
+
+    # Don't accept huge tags.
+    if len(tag) > 50:
+        return False
+
+    # Avoid obvious numeric tags.
+    if re.search(
+        r"\d",
+        tag,
+    ):
+        return False
+
+    # Avoid obvious non-name patterns.
+    blocked_patterns = (
+        "season",
+        "episode",
+        "movie",
+        "opening",
+        "ending",
+        "chapter",
+        "version",
+        "character_",
+        "weapon_",
+        "school_",
+        "uniform_",
+        "background_",
+        "camera_",
+        "effect_",
+        "special_",
+    )
+
+    for pattern in blocked_patterns:
+
+        if tag.startswith(pattern):
+
+            return False
+
+    # A name-like tag should consist mostly of letters
+    # and underscores.
+    if not re.fullmatch(
+        r"[a-z_]+",
+        tag,
+    ):
+
+        return False
+
+    parts = [
+        part
+        for part in tag.split("_")
+        if part
+    ]
+
+    # Most animator names have at least two parts.
+    if len(parts) < 2:
+        return False
+
+    # Don't accept absurdly long individual words.
+    if any(
+        len(part) > 25
+        for part in parts
+    ):
+        return False
+
+    return True
+
+
+# ============================================================
+# SAKUGABOORU CLIENT
+# ============================================================
 
 class SakugabooruClient:
 
     def __init__(self):
 
-        self.used_clips = set()
+        self.session: aiohttp.ClientSession | None = None
 
-        self.animator_clips = {}
+        # Clips already returned during this tournament.
+        self.used_clips: set[str] = set()
 
-        self.verified_animators = {}
+        # Clips previously used by individual animators.
+        self.animator_clips: dict[str, set[str]] = {}
 
-        self._load_cache()
+        # Last successful clip for fallback.
+        self.last_clips: dict[str, dict] = {}
 
-        self.semaphore = asyncio.Semaphore(
-            REQUEST_CONCURRENCY
-        )
+        # Cache animator -> posts.
+        self.animator_cache: dict[str, list[dict]] = {}
 
-    # ========================================================
-    # HEADERS
-    # ========================================================
-
-    @staticmethod
-    def get_headers():
-
-        return {
-            "User-Agent":
-                "Mozilla/5.0 "
-                "(Macintosh; Intel Mac OS X) "
-                "AppleWebKit/605.1.15 "
-                "(KHTML, like Gecko) "
-                "Version/26.0 Safari/605.1.15",
-            "Accept":
-                "application/json,text/plain,*/*",
-            "Referer":
-                "https://www.sakugabooru.com/",
-        }
+        # Cache tag -> result.
+        self.tag_cache: dict[str, list[dict]] = {}
 
     # ========================================================
-    # CACHE
+    # SESSION
     # ========================================================
 
-    def _load_cache(self):
+    async def get_session(self):
 
-        if not os.path.exists(
-            POOL_CACHE_FILE
+        if (
+            self.session is None
+            or self.session.closed
         ):
 
-            self.verified_animators = {}
-
-            return
-
-        try:
-
-            with open(
-                POOL_CACHE_FILE,
-                "r",
-                encoding="utf-8",
-            ) as f:
-
-                data = json.load(f)
-
-            if isinstance(data, dict):
-
-                self.verified_animators = data
-
-            else:
-
-                self.verified_animators = {}
-
-        except Exception as e:
-
-            print(
-                f"Could not load Sakugabooru cache: {e}"
+            timeout = aiohttp.ClientTimeout(
+                total=REQUEST_TIMEOUT
             )
 
-            self.verified_animators = {}
-
-    def _save_cache(self):
-
-        try:
-
-            temp_file = (
-                POOL_CACHE_FILE + ".tmp"
+            self.session = aiohttp.ClientSession(
+                headers=HEADERS,
+                timeout=timeout,
             )
 
-            with open(
-                temp_file,
-                "w",
-                encoding="utf-8",
-            ) as f:
-
-                json.dump(
-                    self.verified_animators,
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-
-            os.replace(
-                temp_file,
-                POOL_CACHE_FILE,
-            )
-
-        except Exception as e:
-
-            print(
-                f"Could not save Sakugabooru cache: {e}"
-            )
+        return self.session
 
     # ========================================================
-    # LOAD KFSL ANIMATOR INDEX
+    # REQUEST
     # ========================================================
 
-    def load_animator_index(self):
-
-        if not os.path.exists(
-            ANIMATOR_INDEX_FILE
-        ):
-
-            print(
-                f"❌ {ANIMATOR_INDEX_FILE} not found."
-            )
-
-            return []
-
-        try:
-
-            with open(
-                ANIMATOR_INDEX_FILE,
-                "r",
-                encoding="utf-8",
-            ) as f:
-
-                data = json.load(f)
-
-        except Exception as e:
-
-            print(
-                f"❌ Could not load animator index: {e}"
-            )
-
-            return []
-
-        people = data.get(
-            "people",
-            {}
-        )
-
-        names = []
-
-        seen = set()
-
-        for person in people.values():
-
-            if not isinstance(
-                person,
-                dict,
-            ):
-                continue
-
-            person_names = person.get(
-                "names",
-                []
-            )
-
-            if not isinstance(
-                person_names,
-                list,
-            ):
-                continue
-
-            for name in person_names:
-
-                if not isinstance(
-                    name,
-                    str,
-                ):
-                    continue
-
-                name = name.strip()
-
-                if not name:
-                    continue
-
-                if not any(
-                    char.isascii()
-                    and char.isalpha()
-                    for char in name
-                ):
-                    continue
-
-                key = name.lower()
-
-                if key in seen:
-                    continue
-
-                seen.add(key)
-
-                names.append(name)
-
-                break
-
-        return names
-
-    # ========================================================
-    # NAME → TAG
-    # ========================================================
-
-    def name_to_tag(
+    async def request_json(
         self,
-        animator_name: str,
+        params: dict,
     ):
 
-        return (
-            animator_name
-            .strip()
-            .lower()
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
-
-    # ========================================================
-    # QUALITY
-    # ========================================================
-
-    @staticmethod
-    def post_quality(post):
+        session = await self.get_session()
 
         try:
-            score = int(
-                post.get("score") or 0
+
+            async with session.get(
+                POST_API,
+                params=params,
+            ) as response:
+
+                if response.status != 200:
+
+                    print(
+                        "Sakugabooru HTTP error:",
+                        response.status,
+                        params,
+                    )
+
+                    return None
+
+                try:
+
+                    return await response.json(
+                        content_type=None
+                    )
+
+                except Exception as e:
+
+                    print(
+                        "Sakugabooru JSON error:",
+                        e,
+                    )
+
+                    return None
+
+        except asyncio.TimeoutError:
+
+            print(
+                "Sakugabooru request timed out."
             )
-        except Exception:
-            score = 0
 
-        try:
-            favorites = int(
-                post.get("fav_count") or 0
+            return None
+
+        except aiohttp.ClientError as e:
+
+            print(
+                "Sakugabooru request error:",
+                e,
             )
-        except Exception:
-            favorites = 0
 
-        try:
-            up_score = int(
-                post.get("up_score") or 0
+            return None
+
+        except Exception as e:
+
+            print(
+                "Unexpected Sakugabooru error:",
+                e,
             )
-        except Exception:
-            up_score = 0
 
-        # Favorites are deliberately weighted strongly.
-        # This helps genuinely popular Sakugabooru posts
-        # appear more often.
-        quality = (
-            max(score, 0) * 3.0
-            + max(up_score, 0) * 1.5
-            + min(favorites, 500) * 1.5
-        )
-
-        return quality
+            return None
 
     # ========================================================
-    # HTTP GET WITH 503 RETRY
+    # GET POSTS
     # ========================================================
 
     async def get_posts(
         self,
-        session,
-        url,
-        animator_name,
+        page: int = 1,
+        limit: int = 100,
+        tags: str | None = None,
     ):
 
-        for attempt in range(
-            MAX_503_RETRIES + 1
-        ):
+        params = {
+            "page": page,
+            "limit": limit,
+        }
 
-            try:
+        if tags:
 
-                async with session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(
-                        total=25
-                    ),
-                ) as response:
+            params["tags"] = tags
 
-                    if response.status == 200:
+        data = await self.request_json(
+            params
+        )
 
-                        return await response.json(
-                            content_type=None
-                        )
+        if not isinstance(data, list):
 
-                    if response.status == 503:
+            return []
 
-                        if attempt < MAX_503_RETRIES:
-
-                            wait_time = (
-                                2 ** attempt
-                            )
-
-                            print(
-                                f"⚠️ Sakugabooru 503 for "
-                                f"{animator_name} — "
-                                f"retrying in "
-                                f"{wait_time}s..."
-                            )
-
-                            await asyncio.sleep(
-                                wait_time
-                            )
-
-                            continue
-
-                        print(
-                            f"⚠️ Sakugabooru 503 for "
-                            f"{animator_name} "
-                            f"after retries."
-                        )
-
-                        return []
-
-                    print(
-                        f"⚠️ Sakugabooru returned HTTP "
-                        f"{response.status} for "
-                        f"{animator_name}"
-                    )
-
-                    return []
-
-            except asyncio.TimeoutError:
-
-                if attempt < MAX_503_RETRIES:
-
-                    await asyncio.sleep(
-                        1 + attempt
-                    )
-
-                    continue
-
-                print(
-                    f"⏱️ Sakugabooru timeout for "
-                    f"{animator_name}"
-                )
-
-                return []
-
-            except Exception as e:
-
-                if attempt < MAX_503_RETRIES:
-
-                    await asyncio.sleep(
-                        1 + attempt
-                    )
-
-                    continue
-
-                print(
-                    f"Sakugabooru search error "
-                    f"for {animator_name}: {e}"
-                )
-
-                return []
-
-        return []
+        return data
 
     # ========================================================
-    # SEARCH ANIMATOR
+    # GET RANDOM POST
     # ========================================================
 
-    async def search_animator(
+    async def get_random_post(
         self,
-        session,
-        animator_name: str,
-        max_pages: int = VERIFY_PAGES,
+        difficulty: str = "extreme",
     ):
 
-        tag = self.name_to_tag(
+        if difficulty == "easy":
+
+            min_score = 40
+
+        elif difficulty == "hard":
+
+            min_score = 15
+
+        else:
+
+            min_score = None
+
+        page = random.randint(
+            1,
+            MAX_POST_PAGES,
+        )
+
+        posts = await self.get_posts(
+            page=page,
+            limit=100,
+        )
+
+        if not posts:
+
+            return None
+
+        random.shuffle(posts)
+
+        for post in posts:
+
+            if not is_video_post(post):
+
+                continue
+
+            if min_score is not None:
+
+                try:
+
+                    score = int(
+                        post.get(
+                            "score",
+                            0,
+                        )
+                    )
+
+                except Exception:
+
+                    score = 0
+
+                if score < min_score:
+
+                    continue
+
+            return post
+
+        return None
+
+    # ========================================================
+    # GET POSTS FOR ANIMATOR
+    # ========================================================
+
+    async def get_animator_posts(
+        self,
+        animator_name: str,
+        limit: int = 100,
+    ):
+
+        tag = normalize_tag(
             animator_name
         )
 
-        clips = []
+        if tag in self.animator_cache:
 
-        seen_ids = set()
+            return self.animator_cache[tag]
 
-        encoded_tag = urllib.parse.quote(
-            tag,
-            safe=""
+        posts = await self.get_posts(
+            page=1,
+            limit=limit,
+            tags=tag,
         )
 
-        async with self.semaphore:
+        video_posts = [
+            post
+            for post in posts
+            if is_video_post(post)
+        ]
 
-            for page in range(
-                1,
-                max_pages + 1,
+        self.animator_cache[
+            tag
+        ] = video_posts
+
+        return video_posts
+
+    # ========================================================
+    # FIND ANIMATOR
+    # ========================================================
+
+    async def find_animator(
+        self,
+        tags,
+    ):
+        """
+        Find a likely animator tag from a post's tags.
+
+        This does NOT use KFSL.
+
+        It only uses the tags supplied by Sakugabooru.
+        """
+
+        if not tags:
+
+            return None
+
+        candidates = []
+
+        for tag in tags:
+
+            tag = normalize_tag(tag)
+
+            if not looks_like_animator_tag(tag):
+
+                continue
+
+            candidates.append(tag)
+
+        if not candidates:
+
+            return None
+
+        # Randomize instead of always choosing the first
+        # possible name.
+        random.shuffle(candidates)
+
+        for candidate in candidates:
+
+            posts = await self.get_animator_posts(
+                candidate,
+                limit=100,
+            )
+
+            if not posts:
+
+                continue
+
+            return {
+                "name": normalize_name(candidate),
+                "tag": candidate,
+            }
+
+        return None
+
+    # ========================================================
+    # FIND ANIME
+    # ========================================================
+
+    async def find_anime(
+        self,
+        tags,
+    ):
+
+        if not tags:
+
+            return None
+
+        # Anime identification is intentionally lightweight.
+        #
+        # We don't need anime names for tournament selection,
+        # but this keeps compatibility with code that may use
+        # find_anime().
+
+        for tag in tags:
+
+            tag = normalize_tag(tag)
+
+            if not tag:
+                continue
+
+            if tag in IGNORED_TAGS:
+                continue
+
+            if tag.endswith(
+                "_season"
             ):
+                continue
 
-                url = (
-                    f"{BASE_URL}/post.json"
-                    f"?tags={encoded_tag}"
-                    f"&page={page}"
-                    f"&limit={POSTS_PER_PAGE}"
-                )
+        return None
 
-                posts = await self.get_posts(
-                    session,
-                    url,
-                    animator_name,
-                )
+    # ========================================================
+    # BATTLE CLIP
+    # ========================================================
 
-                if not isinstance(
-                    posts,
-                    list,
-                ):
+    async def get_battle_clip(
+        self,
+        animator_name: str,
+        mode: str = "random",
+    ):
+        """
+        Get a clip for an animator.
+
+        random:
+            Try to give a new clip.
+
+        continuous:
+            Keep using the animator's current clip.
+
+        If a new clip cannot be found, return the previous
+        successful clip as a fallback.
+        """
+
+        if not animator_name:
+
+            return None
+
+        animator_key = normalize_tag(
+            animator_name
+        )
+
+        previous_clip = self.last_clips.get(
+            animator_key
+        )
+
+        # ----------------------------------------------------
+        # CONTINUOUS MODE
+        # ----------------------------------------------------
+
+        if (
+            mode == "continuous"
+            and previous_clip is not None
+        ):
+
+            return previous_clip
+
+        # ----------------------------------------------------
+        # GET POSTS
+        # ----------------------------------------------------
+
+        posts = await self.get_animator_posts(
+            animator_key,
+            limit=100,
+        )
+
+        if not posts:
+
+            return previous_clip
+
+        # ----------------------------------------------------
+        # SHUFFLE
+        # ----------------------------------------------------
+
+        posts = posts.copy()
+
+        random.shuffle(posts)
+
+        used_by_animator = self.animator_clips.get(
+            animator_key,
+            set(),
+        )
+
+        # ----------------------------------------------------
+        # TRY UNUSED CLIP
+        # ----------------------------------------------------
+
+        for post in posts:
+
+            url = post_url(post)
+
+            if not url:
+                continue
+
+            # Don't use a clip this animator already used.
+            if url in used_by_animator:
+
+                continue
+
+            # Don't reuse a clip globally if another animator
+            # somehow points to the same media.
+            if url in self.used_clips:
+
+                continue
+
+            clip = {
+                "url": url,
+                "id": post.get("id"),
+                "score": post.get("score", 0),
+                "file_ext": post.get(
+                    "file_ext"
+                ),
+                "tags": post.get(
+                    "tags",
+                    "",
+                ),
+            }
+
+            used_by_animator.add(url)
+
+            self.animator_clips[
+                animator_key
+            ] = used_by_animator
+
+            self.used_clips.add(url)
+
+            self.last_clips[
+                animator_key
+            ] = clip
+
+            return clip
+
+        # ----------------------------------------------------
+        # NO NEW CLIP
+        # ----------------------------------------------------
+
+        # Important:
+        #
+        # Do NOT fail the tournament.
+        #
+        # Reuse the animator's previous successful clip.
+        return previous_clip
+
+    # ========================================================
+    # DISCOVER ANIMATORS FROM SAKUGABOORU
+    # ========================================================
+
+    async def discover_animators(
+        self,
+        pages: int = 10,
+    ):
+        """
+        Discover animator candidates directly from
+        Sakugabooru video posts.
+
+        No KFSL is used.
+        """
+
+        candidates = {}
+
+        pages = max(
+            1,
+            min(
+                pages,
+                100,
+            ),
+        )
+
+        page_numbers = list(
+            range(
+                1,
+                pages + 1,
+            )
+        )
+
+        random.shuffle(
+            page_numbers
+        )
+
+        for page in page_numbers:
+
+            posts = await self.get_posts(
+                page=page,
+                limit=100,
+            )
+
+            if not posts:
+
+                continue
+
+            for post in posts:
+
+                if not is_video_post(post):
+
                     continue
 
-                if not posts:
-                    break
+                tags = extract_tags(post)
 
-                for post in posts:
+                for tag in tags:
 
-                    ext = str(
-                        post.get(
-                            "file_ext",
-                            ""
-                        )
-                    ).lower()
+                    if not looks_like_animator_tag(tag):
 
-                    if ext not in (
-                        "mp4",
-                        "webm",
-                    ):
                         continue
 
-                    file_url = post.get(
-                        "file_url"
-                    )
+                    name = normalize_name(tag)
 
-                    if not file_url:
+                    if not name:
+
                         continue
 
-                    post_id = post.get(
-                        "id"
-                    )
+                    if tag not in candidates:
 
-                    if post_id is None:
-                        continue
+                        candidates[tag] = {
+                            "name": name,
+                            "tag": tag,
+                            "posts": [],
+                            "quality": 0.0,
+                        }
 
-                    if post_id in seen_ids:
-                        continue
-
-                    seen_ids.add(
-                        post_id
-                    )
-
-                    quality = self.post_quality(
+                    candidates[tag]["posts"].append(
                         post
                     )
 
-                    clips.append({
-                        "id": post_id,
+                    try:
 
-                        "url": file_url,
-
-                        "preview_url":
-                            post.get(
-                                "preview_url"
-                            ),
-
-                        "animator":
-                            animator_name,
-
-                        "score":
+                        score = float(
                             post.get(
                                 "score",
                                 0,
-                            ),
+                            )
+                        )
 
-                        "fav_count":
-                            post.get(
-                                "fav_count",
-                                0,
-                            ),
+                    except Exception:
 
-                        "quality":
-                            quality,
-                    })
+                        score = 0.0
 
-        return tag, clips
+                    if score > candidates[tag]["quality"]:
+
+                        candidates[tag]["quality"] = score
+
+        return list(
+            candidates.values()
+        )
 
     # ========================================================
     # VERIFY ANIMATOR
@@ -513,314 +931,39 @@ class SakugabooruClient:
 
     async def verify_animator(
         self,
-        animator_name: str,
-        session=None,
-        force=False,
+        candidate: dict,
     ):
+        """
+        Verify that an animator actually has usable
+        Sakugabooru video clips.
+        """
 
-        key = animator_name.strip().lower()
+        if not candidate:
 
-        cached = self.verified_animators.get(
-            key
+            return False
+
+        tag = candidate.get(
+            "tag"
         )
 
-        if (
-            cached is not None
-            and not force
-        ):
-
-            return cached
-
-        own_session = False
-
-        if session is None:
-
-            session = aiohttp.ClientSession(
-                headers=self.get_headers()
-            )
-
-            own_session = True
-
-        try:
-
-            tag, clips = await self.search_animator(
-                session,
-                animator_name,
-                max_pages=VERIFY_PAGES,
-            )
-
-            if not clips:
-
-                result = {
-                    "name": animator_name,
-                    "tag": tag,
-                    "has_clips": False,
-                    "clip_count": 0,
-                    "best_quality": 0,
-                    "total_quality": 0,
-                    "best_favorites": 0,
-                    "quality": 0,
-                }
-
-            else:
-
-                qualities = [
-                    float(
-                        clip.get(
-                            "quality",
-                            0
-                        )
-                    )
-                    for clip in clips
-                ]
-
-                best_quality = max(
-                    qualities
-                )
-
-                total_quality = sum(
-                    qualities
-                )
-
-                best_favorites = max(
-                    int(
-                        clip.get(
-                            "fav_count",
-                            0
-                        ) or 0
-                    )
-                    for clip in clips
-                )
-
-                # Stronger quality formula.
-                battle_quality = (
-                    best_quality * 0.60
-                    + total_quality * 0.15
-                    + best_favorites * 10
-                    + min(
-                        len(clips),
-                        100,
-                    ) * 5
-                )
-
-                result = {
-                    "name": animator_name,
-                    "tag": tag,
-                    "has_clips": True,
-                    "clip_count": len(clips),
-                    "best_quality": best_quality,
-                    "total_quality": total_quality,
-                    "best_favorites": best_favorites,
-                    "quality": battle_quality,
-                }
-
-            self.verified_animators[
-                key
-            ] = result
-
-            self._save_cache()
-
-            return result
-
-        finally:
-
-            if own_session:
-
-                await session.close()
-
-    # ========================================================
-    # VERIFY MANY
-    # ========================================================
-
-    async def verify_many(
-        self,
-        animator_names,
-        force=False,
-    ):
-
-        unique = []
-
-        seen = set()
-
-        for name in animator_names:
-
-            if not isinstance(
-                name,
-                str,
-            ):
-                continue
-
-            name = name.strip()
-
-            if not name:
-                continue
-
-            key = name.lower()
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-
-            unique.append(name)
-
-        if not unique:
-            return []
-
-        async with aiohttp.ClientSession(
-            headers=self.get_headers()
-        ) as session:
-
-            tasks = [
-                self.verify_animator(
-                    name,
-                    session=session,
-                    force=force,
-                )
-                for name in unique
-            ]
-
-            results = await asyncio.gather(
-                *tasks,
-                return_exceptions=True,
-            )
-
-        verified = []
-
-        for result in results:
-
-            if isinstance(
-                result,
-                Exception,
-            ):
-                continue
-
-            if result.get(
-                "has_clips"
-            ):
-                verified.append(result)
-
-        return verified
-
-    # ========================================================
-    # BUILD BATTLE POOL
-    # ========================================================
-
-    async def build_battle_pool(
-        self,
-        force=False,
-    ):
-
-        names = self.load_animator_index()
-
-        if not names:
-            return []
-
-        # ----------------------------------------------------
-        # USE EXISTING CACHE FIRST
-        # ----------------------------------------------------
-
-        cached_pool = []
-
-        for name in names:
-
-            cached = self.verified_animators.get(
-                name.lower()
-            )
-
-            if not cached:
-                continue
-
-            if not cached.get(
-                "has_clips"
-            ):
-                continue
-
-            cached_pool.append(
-                cached
-            )
-
-        # If cache already has a good pool, don't hammer
-        # Sakugabooru with thousands of requests.
-        if (
-            not force
-            and len(cached_pool) >= 20
-        ):
-
-            cached_pool.sort(
-                key=lambda x: float(
-                    x.get(
-                        "quality",
-                        0
-                    )
-                ),
-                reverse=True,
-            )
-
-            print(
-                f"✅ Using {len(cached_pool):,} "
-                f"cached Sakugabooru animators."
-            )
-
-            return cached_pool
-
-        # ----------------------------------------------------
-        # INITIAL BUILD
-        # ----------------------------------------------------
-
-        print(
-            f"🔎 Building animator pool from "
-            f"{len(names):,} KFSL names..."
+        name = candidate.get(
+            "name"
         )
 
-        # Don't request every single animator at once.
-        # Select a large random sample so the bot doesn't
-        # spend all night hitting Sakugabooru.
-        sample_size = min(
-            300,
-            len(names)
+        if not tag and name:
+
+            tag = normalize_tag(name)
+
+        if not tag:
+
+            return False
+
+        posts = await self.get_animator_posts(
+            tag,
+            limit=100,
         )
 
-        sample = random.sample(
-            names,
-            sample_size
-        )
-
-        # Always include cached animators.
-        for name in names:
-
-            if name.lower() in self.verified_animators:
-
-                if name not in sample:
-
-                    sample.append(name)
-
-        verified = await self.verify_many(
-            sample,
-            force=force,
-        )
-
-        if not verified:
-
-            # Fall back to whatever cache exists.
-            return cached_pool
-
-        verified.sort(
-            key=lambda x: float(
-                x.get(
-                    "quality",
-                    0
-                )
-            ),
-            reverse=True,
-        )
-
-        print(
-            f"✅ Found {len(verified):,} "
-            f"verified animators."
-        )
-
-        return verified
+        return len(posts) > 0
 
     # ========================================================
     # CHOOSE BATTLE ANIMATORS
@@ -830,281 +973,295 @@ class SakugabooruClient:
         self,
         count: int,
     ):
+        """
+        Choose tournament participants exclusively from
+        Sakugabooru.
 
-        pool = await self.build_battle_pool()
+        KFSL is NOT used.
 
-        if len(pool) < count:
+        Every selected animator must have at least one
+        usable video post on Sakugabooru.
+        """
+
+        if count < 2:
+
+            raise ValueError(
+                "Battle requires at least 2 animators."
+            )
+
+        # ----------------------------------------------------
+        # DISCOVER
+        # ----------------------------------------------------
+
+        # Search several pages so small/rare names have
+        # a better chance of appearing.
+        discovery_pages = max(
+            10,
+            min(
+                100,
+                count * 5,
+            ),
+        )
+
+        candidates = await self.discover_animators(
+            pages=discovery_pages
+        )
+
+        if not candidates:
 
             return []
 
         # ----------------------------------------------------
-        # TOP QUALITY POOL
+        # SHUFFLE
         # ----------------------------------------------------
 
-        pool = [
-            animator
-            for animator in pool
-            if animator.get(
-                "has_clips"
-            )
-        ]
+        random.shuffle(
+            candidates
+        )
 
-        pool.sort(
-            key=lambda x: float(
-                x.get(
-                    "quality",
-                    0
+        # ----------------------------------------------------
+        # REMOVE DUPLICATES
+        # ----------------------------------------------------
+
+        unique = {}
+
+        for candidate in candidates:
+
+            tag = normalize_tag(
+                candidate.get(
+                    "tag",
+                    "",
                 )
-            ),
-            reverse=True,
+            )
+
+            if not tag:
+
+                continue
+
+            unique[tag] = candidate
+
+        candidates = list(
+            unique.values()
         )
 
-        # Keep popular/high-quality animators available,
-        # while still allowing less-famous people.
-        top_pool_size = min(
-            max(
-                count * 12,
-                30
-            ),
-            len(pool)
-        )
+        # ----------------------------------------------------
+        # SORT A LITTLE BY QUALITY
+        # ----------------------------------------------------
+        #
+        # Don't simply choose the highest-scoring animators,
+        # because that would make every tournament nearly
+        # identical.
+        #
+        # Instead, give higher-quality candidates a slightly
+        # better chance while retaining randomness.
 
-        candidates = pool[
-            :top_pool_size
-        ].copy()
+        weighted = []
+
+        for candidate in candidates:
+
+            quality = candidate.get(
+                "quality",
+                0,
+            )
+
+            try:
+
+                quality = float(
+                    quality
+                )
+
+            except Exception:
+
+                quality = 0.0
+
+            # Clamp weight.
+            weight = max(
+                1.0,
+                min(
+                    quality + 10.0,
+                    100.0,
+                ),
+            )
+
+            candidate[
+                "_weight"
+            ] = weight
+
+            weighted.append(
+                candidate
+            )
+
+        # ----------------------------------------------------
+        # SELECT
+        # ----------------------------------------------------
 
         selected = []
 
-        for _ in range(count):
+        remaining = weighted.copy()
 
-            if not candidates:
-                break
+        while (
+            remaining
+            and len(selected) < count
+        ):
 
-            weights = []
+            total_weight = sum(
+                candidate["_weight"]
+                for candidate in remaining
+            )
 
-            for animator in candidates:
+            if total_weight <= 0:
 
-                quality = max(
-                    float(
-                        animator.get(
-                            "quality",
-                            0
-                        )
-                    ),
-                    1
+                candidate = random.choice(
+                    remaining
                 )
 
-                # Square root prevents one gigantic
-                # favorite count from dominating everything.
-                weight = max(
-                    1,
-                    quality ** 0.5
-                )
+            else:
 
-                weights.append(
-                    weight
-                )
-
-            chosen = random.choices(
-                candidates,
-                weights=weights,
-                k=1,
-            )[0]
+                candidate = random.choices(
+                    remaining,
+                    weights=[
+                        c["_weight"]
+                        for c in remaining
+                    ],
+                    k=1,
+                )[0]
 
             selected.append(
-                chosen
+                candidate
             )
 
-            candidates.remove(
-                chosen
+            remaining.remove(
+                candidate
             )
 
-        return selected
+        # ----------------------------------------------------
+        # FINAL VERIFICATION
+        # ----------------------------------------------------
 
-    # ========================================================
-    # GET CLIPS
-    # ========================================================
+        verified = []
 
-    async def get_clips(
-        self,
-        animator_input: str,
-        count: int = 10,
-    ):
+        for candidate in selected:
 
-        if not animator_input:
+            try:
 
-            return (
-                self.name_to_tag(""),
-                [],
-            )
-
-        async with aiohttp.ClientSession(
-            headers=self.get_headers()
-        ) as session:
-
-            _, clips = await self.search_animator(
-                session,
-                animator_input,
-                max_pages=5,
-            )
-
-        available = [
-            clip
-            for clip in clips
-            if clip["id"]
-            not in self.used_clips
-        ]
-
-        random.shuffle(
-            available
-        )
-
-        return (
-            self.name_to_tag(
-                animator_input
-            ),
-            available[:count],
-        )
-
-    # ========================================================
-    # RANDOM CLIP
-    # ========================================================
-
-    async def get_random_clip(
-        self,
-        animator_name: str,
-    ):
-
-        if not animator_name:
-            return None
-
-        _, clips = await self.get_clips(
-            animator_name,
-            count=30,
-        )
-
-        available = [
-            clip
-            for clip in clips
-            if clip["id"]
-            not in self.used_clips
-        ]
-
-        if not available:
-
-            async with aiohttp.ClientSession(
-                headers=self.get_headers()
-            ) as session:
-
-                _, clips = await self.search_animator(
-                    session,
-                    animator_name,
-                    max_pages=10,
+                valid = await self.verify_animator(
+                    candidate
                 )
 
-            available = [
-                clip
-                for clip in clips
-                if clip["id"]
-                not in self.used_clips
-            ]
+            except Exception as e:
 
-        if not available:
-            return None
+                print(
+                    "Animator verification error:",
+                    candidate.get("name"),
+                    e,
+                )
 
-        weights = []
+                valid = False
 
-        for clip in available:
+            if not valid:
 
-            quality = max(
-                float(
-                    clip.get(
+                continue
+
+            verified.append(
+                {
+                    "name": candidate[
+                        "name"
+                    ],
+
+                    "tag": candidate[
+                        "tag"
+                    ],
+
+                    "quality": candidate.get(
                         "quality",
-                        0
-                    )
-                ),
-                1
+                        0,
+                    ),
+                }
             )
 
-            # Popular clips have a higher probability,
-            # but aren't guaranteed every time.
-            weight = max(
-                1,
-                quality + 10
-            )
+            if len(verified) >= count:
 
-            weights.append(
-                weight
-            )
+                break
 
-        clip = random.choices(
-            available,
-            weights=weights,
-            k=1,
-        )[0]
-
-        self.used_clips.add(
-            clip["id"]
-        )
-
-        return clip
-
-    # ========================================================
-    # CONTINUOUS CLIP
-    # ========================================================
-
-    async def get_continuous_clip(
-        self,
-        animator_name: str,
-    ):
-
-        key = animator_name.strip().lower()
-
-        if key in self.animator_clips:
-
-            return self.animator_clips[
-                key
-            ]
-
-        clip = await self.get_random_clip(
-            animator_name
-        )
-
-        if clip is None:
-            return None
-
-        self.animator_clips[
-            key
-        ] = clip
-
-        return clip
-
-    # ========================================================
-    # BATTLE CLIP
-    # ========================================================
-
-    async def get_battle_clip(
-        self,
-        animator_name: str,
-        mode: str,
-    ):
-
-        if mode == "continuous":
-
-            return await self.get_continuous_clip(
-                animator_name
-            )
-
-        return await self.get_random_clip(
-            animator_name
-        )
+        return verified
 
     # ========================================================
     # RESET
     # ========================================================
 
     def reset(self):
+        """
+        Reset tournament clip state.
+
+        The HTTP session is intentionally left open until
+        close() is called.
+        """
 
         self.used_clips.clear()
 
         self.animator_clips.clear()
+
+        self.last_clips.clear()
+
+        self.animator_cache.clear()
+
+        self.tag_cache.clear()
+
+    # ========================================================
+    # CLOSE
+    # ========================================================
+
+    async def close(self):
+
+        if (
+            self.session is not None
+            and not self.session.closed
+        ):
+
+            await self.session.close()
+
+        self.session = None
+
+    # ========================================================
+    # CONTEXT MANAGER
+    # ========================================================
+
+    async def __aenter__(self):
+
+        await self.get_session()
+
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type,
+        exc,
+        tb,
+    ):
+
+        await self.close()
+
+
+# ============================================================
+# COMPATIBILITY HELPERS
+# ============================================================
+
+async def get_random_post(
+    difficulty: str = "extreme",
+):
+    """
+    Convenience function for code that previously imported
+    get_random_post directly.
+    """
+
+    client = SakugabooruClient()
+
+    try:
+
+        return await client.get_random_post(
+            difficulty
+        )
+
+    finally:
+
+        await client.close()

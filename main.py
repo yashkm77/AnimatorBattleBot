@@ -334,8 +334,9 @@ async def get_clips_for_match(
     return clip_a, clip_b
 
 
+```python
 # ============================================================
-# RUN MATCH
+# RUN MATCH — CLEAN DISPLAY
 # ============================================================
 
 async def run_match(
@@ -364,26 +365,73 @@ async def run_match(
         tournament.mode,
     )
 
-    if clip_a is None:
+    # ========================================================
+    # CLIP FALLBACK
+    # ========================================================
+
+    if clip_a is None and clip_b is None:
 
         await interaction.channel.send(
-            f"❌ Couldn't find a Sakugabooru "
-            f"clip for **{name_a}**."
+            f"❌ Couldn't find usable clips for "
+            f"**{name_a}** or **{name_b}**."
         )
 
         return False
+
+    # If one animator has no new clip,
+    # try using that animator's previous clip.
+    if clip_a is None:
+
+        fallback_clip = getattr(
+            match.animator_a,
+            "current_clip",
+            None,
+        )
+
+        if fallback_clip is not None:
+
+            clip_a = fallback_clip
+
+        else:
+
+            await interaction.channel.send(
+                f"❌ Couldn't find a Sakugabooru "
+                f"clip for **{name_a}**."
+            )
+
+            return False
 
     if clip_b is None:
 
-        await interaction.channel.send(
-            f"❌ Couldn't find a Sakugabooru "
-            f"clip for **{name_b}**."
+        fallback_clip = getattr(
+            match.animator_b,
+            "current_clip",
+            None,
         )
 
-        return False
+        if fallback_clip is not None:
+
+            clip_b = fallback_clip
+
+        else:
+
+            await interaction.channel.send(
+                f"❌ Couldn't find a Sakugabooru "
+                f"clip for **{name_b}**."
+            )
+
+            return False
 
     # ========================================================
-    # VIEW
+    # SAVE CURRENT CLIPS
+    # ========================================================
+
+    match.animator_a.current_clip = clip_a
+
+    match.animator_b.current_clip = clip_b
+
+    # ========================================================
+    # VOTING VIEW
     # ========================================================
 
     view = BattleVoteView(
@@ -392,7 +440,6 @@ async def run_match(
     )
 
     view.children[0].label = name_a
-
     view.children[1].label = name_b
 
     # ========================================================
@@ -400,8 +447,7 @@ async def run_match(
     # ========================================================
 
     await interaction.channel.send(
-        f"⚔️ **ANIMATOR BATTLE — MATCH "
-        f"{match.match_id}**\n"
+        f"⚔️ **ANIMATOR BATTLE — MATCH {match.match_id}**\n"
         f"**{name_a} vs {name_b}**"
     )
 
@@ -410,11 +456,8 @@ async def run_match(
     # ========================================================
 
     await interaction.channel.send(
-        f"🎬 **{name_a}**"
-    )
-
-    await interaction.channel.send(
-        clip_a["url"]
+        f"🎬 **{name_a}**\n"
+        f"{clip_a['url']}"
     )
 
     # ========================================================
@@ -422,11 +465,8 @@ async def run_match(
     # ========================================================
 
     await interaction.channel.send(
-        f"🎬 **{name_b}**"
-    )
-
-    await interaction.channel.send(
-        clip_b["url"]
+        f"🎬 **{name_b}**\n"
+        f"{clip_b['url']}"
     )
 
     # ========================================================
@@ -434,23 +474,19 @@ async def run_match(
     # ========================================================
 
     await interaction.channel.send(
-        "🗳️ **Vote for the best animation!**\n"
-        f"⏱️ **{VOTE_TIME} seconds**"
-    )
-
-    await interaction.channel.send(
-        " ",
+        f"🗳️ **Vote for the best animation!**\n"
+        f"⏱️ **{VOTE_TIME} seconds**",
         view=view,
     )
 
     # ========================================================
-    # WAIT
+    # WAIT FOR VOTES
     # ========================================================
 
     await view.wait_for_votes()
 
     # ========================================================
-    # COUNT
+    # COUNT VOTES
     # ========================================================
 
     votes_a = len(
@@ -462,8 +498,11 @@ async def run_match(
     )
 
     match.votes_a = votes_a
-
     match.votes_b = votes_b
+
+    # ========================================================
+    # DETERMINE WINNER
+    # ========================================================
 
     if votes_a == votes_b:
 
@@ -483,7 +522,7 @@ async def run_match(
         winner = match.animator_b
 
     # ========================================================
-    # RECORD
+    # RECORD RESULT
     # ========================================================
 
     tournament.record_result(
@@ -492,58 +531,67 @@ async def run_match(
     )
 
     # ========================================================
-    # RESULT
+    # RESULT MESSAGE
     # ========================================================
 
     winner_name = display_name(
         winner.name
     )
 
-    await interaction.channel.send(
-        f"🏆 **{winner_name} wins!**"
+    loser_name = display_name(
+        match.loser.name
     )
 
-    # ========================================================
-    # VOTES
-    # ========================================================
+    result_lines = [
+        f"🏆 **{winner_name} wins!**",
+        "",
+        f"🗳️ **Votes: {name_a} {votes_a} — "
+        f"{name_b} {votes_b}**",
+    ]
 
-    await interaction.channel.send(
-        f"🗳️ **Votes: {name_a} {votes_a} — {name_b} {votes_b}**"
-    )
+    # ========================================================
+    # VOTER LIST
+    # ========================================================
 
     if view.voter_choices:
 
-        voter_lines = []
+        result_lines.append("")
 
         for (
             username,
             voted_for,
         ) in view.voter_choices.values():
 
-            voter_lines.append(
-                f"• **{username}** → "
+            result_lines.append(
+                f"👤 **{username}** → "
                 f"**{display_name(voted_for)}**"
             )
 
-        await interaction.channel.send(
-            "\n".join(voter_lines)
-        )
-
     else:
 
-        await interaction.channel.send(
-            "• **No votes were cast.**"
+        result_lines.append("")
+        result_lines.append(
+            "👤 **No votes were cast.**"
         )
 
-    # ========================================================
-    # SEPARATOR BEFORE NEXT MATCH
-    # ========================================================
-
     await interaction.channel.send(
-        "──────────────"
+        "\n".join(result_lines)
     )
 
+    # ========================================================
+    # NO SEPARATOR
+    # ========================================================
+    #
+    # The next match starts naturally.
+    #
+    # No:
+    #
+    # ──────────────
+    #
+    # ========================================================
+
     return True
+
 
 # ============================================================
 # RUN TOURNAMENT
