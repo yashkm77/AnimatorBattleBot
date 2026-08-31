@@ -11,8 +11,6 @@ import re
 BASE_URL = "https://www.sakugabooru.com"
 
 POST_API = f"{BASE_URL}/post.json"
-
-# Sakugabooru uses the Danbooru-style tag system.
 TAG_API = f"{BASE_URL}/tag.json"
 
 USER_AGENT = (
@@ -35,7 +33,7 @@ VIDEO_EXTENSIONS = {
     "webm",
 }
 
-# Standard booru artist category.
+# Danbooru/Sakugabooru artist category
 ARTIST_CATEGORY = 1
 
 
@@ -44,10 +42,7 @@ ARTIST_CATEGORY = 1
 # ============================================================
 
 IGNORED_TAGS = {
-    # --------------------------------------------------------
-    # PEOPLE / CHARACTER COUNTS
-    # --------------------------------------------------------
-
+    # People / character counts
     "1girl",
     "1boy",
     "2girls",
@@ -73,56 +68,38 @@ IGNORED_TAGS = {
     "multiple_girls",
     "multiple_boys",
 
-    # --------------------------------------------------------
-    # GENERIC
-    # --------------------------------------------------------
-
+    # Generic
     "animated",
     "animation",
     "anime",
     "manga",
-
     "character",
     "characters",
-
     "background",
     "landscape",
     "scenery",
 
-    # --------------------------------------------------------
-    # MEDIA
-    # --------------------------------------------------------
-
+    # Media
     "screenshot",
     "official_art",
     "promotional_art",
     "cover",
-
     "video",
     "gif",
     "sound",
     "music",
 
-    # --------------------------------------------------------
-    # TEXT
-    # --------------------------------------------------------
-
+    # Text
     "text",
     "english_text",
     "japanese_text",
 
-    # --------------------------------------------------------
-    # CLOTHING
-    # --------------------------------------------------------
-
+    # Clothing
     "school_uniform",
     "uniform",
     "school",
 
-    # --------------------------------------------------------
-    # HAIR
-    # --------------------------------------------------------
-
+    # Hair
     "long_hair",
     "short_hair",
     "black_hair",
@@ -135,53 +112,36 @@ IGNORED_TAGS = {
     "purple_hair",
     "white_hair",
 
-    # --------------------------------------------------------
-    # EYES
-    # --------------------------------------------------------
-
+    # Eyes
     "blue_eyes",
     "brown_eyes",
     "green_eyes",
     "red_eyes",
     "purple_eyes",
 
-    # --------------------------------------------------------
-    # OBJECTS
-    # --------------------------------------------------------
-
+    # Objects
     "weapon",
     "sword",
     "gun",
 
-    # --------------------------------------------------------
-    # ENVIRONMENT
-    # --------------------------------------------------------
-
+    # Environment
     "day",
     "night",
     "indoors",
     "outdoors",
-
     "simple_background",
     "gradient_background",
-
     "reflection",
     "water",
     "sky",
     "cloud",
 
-    # --------------------------------------------------------
-    # ART
-    # --------------------------------------------------------
-
+    # Art
     "comic",
     "illustration",
     "art",
 
-    # --------------------------------------------------------
-    # BODY / POSE
-    # --------------------------------------------------------
-
+    # Body / pose
     "close_up",
     "full_body",
     "upper_body",
@@ -189,26 +149,20 @@ IGNORED_TAGS = {
     "profile",
     "front_view",
     "side_view",
-
     "looking_at_viewer",
     "looking_back",
-
     "smile",
     "open_mouth",
     "closed_eyes",
     "blush",
     "teeth",
-
     "hair",
     "eyes",
     "mouth",
     "hands",
     "feet",
 
-    # --------------------------------------------------------
-    # ACTION
-    # --------------------------------------------------------
-
+    # Action
     "fighting",
     "action",
     "running",
@@ -219,7 +173,6 @@ IGNORED_TAGS = {
     "standing",
     "lying",
     "dancing",
-
     "explosion",
     "fire",
     "smoke",
@@ -234,6 +187,7 @@ IGNORED_TAGS = {
 BLOCKED_WORDS = {
     "season",
     "episode",
+    "episodes",
     "opening",
     "ending",
     "movie",
@@ -278,12 +232,8 @@ BLOCKED_WORDS = {
     "mouth",
     "face",
 
-    "background",
     "landscape",
     "scenery",
-
-    "episode",
-    "episodes",
 }
 
 
@@ -334,19 +284,14 @@ ANIME_PREFIXES = (
 # HELPERS
 # ============================================================
 
-def normalize_name(
-    name: str,
-) -> str:
+def normalize_name(name: str) -> str:
 
     if not name:
         return ""
 
     name = str(name).strip()
 
-    name = name.replace(
-        "_",
-        " ",
-    )
+    name = name.replace("_", " ")
 
     name = re.sub(
         r"\s+",
@@ -357,19 +302,14 @@ def normalize_name(
     return name.strip()
 
 
-def normalize_tag(
-    tag: str,
-) -> str:
+def normalize_tag(tag: str) -> str:
 
     if not tag:
         return ""
 
     tag = str(tag).strip().lower()
 
-    tag = tag.replace(
-        " ",
-        "_",
-    )
+    tag = tag.replace(" ", "_")
 
     tag = re.sub(
         r"_+",
@@ -380,26 +320,17 @@ def normalize_tag(
     return tag.strip("_")
 
 
-def is_video_post(
-    post: dict,
-) -> bool:
+def is_video_post(post: dict) -> bool:
 
-    if not isinstance(
-        post,
-        dict,
-    ):
+    if not isinstance(post, dict):
         return False
 
-    file_url = post.get(
-        "file_url"
-    )
+    file_url = post.get("file_url")
 
     if not file_url:
         return False
 
-    extension = post.get(
-        "file_ext"
-    )
+    extension = post.get("file_ext")
 
     if extension:
 
@@ -420,80 +351,51 @@ def is_video_post(
     )
 
 
-def post_url(
-    post: dict,
-) -> str | None:
+def post_url(post: dict) -> str | None:
 
-    if not isinstance(
-        post,
-        dict,
-    ):
+    if not isinstance(post, dict):
         return None
 
-    return post.get(
-        "file_url"
-    )
+    return post.get("file_url")
 
 
-def extract_tags(
-    post: dict,
-) -> list[str]:
+def extract_tags(post: dict) -> list[str]:
 
-    if not isinstance(
-        post,
-        dict,
-    ):
+    if not isinstance(post, dict):
         return []
 
-    tags = post.get(
-        "tags"
-    )
+    tags = post.get("tags")
 
     if not tags:
-
         tags = post.get(
             "tag_string",
             "",
         )
 
-    if isinstance(
-        tags,
-        list,
-    ):
+    if isinstance(tags, list):
 
         result = []
 
         for tag in tags:
 
-            normalized = normalize_tag(
-                tag
-            )
+            normalized = normalize_tag(tag)
 
             if normalized:
-                result.append(
-                    normalized
-                )
+                result.append(normalized)
 
         return result
 
-    if not isinstance(
-        tags,
-        str,
-    ):
+    if not isinstance(tags, str):
         return []
 
     result = []
 
     for tag in tags.split():
 
-        normalized = normalize_tag(
-            tag
-        )
+        normalized = normalize_tag(tag)
 
         if normalized:
-            result.append(
-                normalized
-            )
+            result.append(normalized)
 
     return result
 
@@ -502,20 +404,15 @@ def extract_tags(
 # NAME-LIKE FILTER
 # ============================================================
 
-def looks_like_name(
-    tag: str,
-) -> bool:
+def looks_like_name(tag: str) -> bool:
     """
-    Preliminary filter only.
+    Preliminary filter.
 
-    This is NOT enough to make something an animator.
-
-    Artist-category verification is preferred.
+    This does NOT prove the tag is an animator.
+    Actual verification happens separately.
     """
 
-    tag = normalize_tag(
-        tag
-    )
+    tag = normalize_tag(tag)
 
     if not tag:
         return False
@@ -523,7 +420,7 @@ def looks_like_name(
     if tag in IGNORED_TAGS:
         return False
 
-    # Animator names normally have at least two words.
+    # Names generally have multiple words.
     if "_" not in tag:
         return False
 
@@ -533,14 +430,11 @@ def looks_like_name(
     if len(tag) > 60:
         return False
 
-    # Reject numbers.
-    if re.search(
-        r"\d",
-        tag,
-    ):
+    # No numbers.
+    if re.search(r"\d", tag):
         return False
 
-    # Only normal latin-style tags.
+    # Latin lowercase + underscores only.
     if not re.fullmatch(
         r"[a-z_]+",
         tag,
@@ -556,7 +450,7 @@ def looks_like_name(
     if len(parts) < 2:
         return False
 
-    # Avoid absurdly long words.
+    # Reject absurdly long words.
     if any(
         len(part) > 30
         for part in parts
@@ -584,9 +478,7 @@ def looks_like_name(
 
 class SakugabooruClient:
 
-    def __init__(
-        self,
-    ):
+    def __init__(self):
 
         self.session = None
 
@@ -610,13 +502,12 @@ class SakugabooruClient:
 
         self.artist_tag_cache = {}
 
+
     # ========================================================
     # SESSION
     # ========================================================
 
-    async def get_session(
-        self,
-    ):
+    async def get_session(self):
 
         if (
             self.session is None
@@ -634,8 +525,9 @@ class SakugabooruClient:
 
         return self.session
 
+
     # ========================================================
-    # REQUEST
+    # REQUEST JSON
     # ========================================================
 
     async def request_json(
@@ -707,8 +599,9 @@ class SakugabooruClient:
 
             return None
 
+
     # ========================================================
-    # POSTS
+    # GET POSTS
     # ========================================================
 
     async def get_posts(
@@ -724,7 +617,6 @@ class SakugabooruClient:
         }
 
         if tags:
-
             params["tags"] = tags
 
         data = await self.request_json(
@@ -736,13 +628,13 @@ class SakugabooruClient:
             data,
             list,
         ):
-
             return []
 
         return data
 
+
     # ========================================================
-    # TAG INFO
+    # GET TAG INFO
     # ========================================================
 
     async def get_tag_info(
@@ -750,33 +642,21 @@ class SakugabooruClient:
         tag: str,
     ):
         """
-        Try to retrieve the Sakugabooru tag record.
+        Get Sakugabooru tag information.
 
-        The important field is:
-
-            category = 1
-
-        which is the standard artist category.
-
-        If the endpoint is unavailable, None is returned.
+        Returns:
+            category number
+            or None if the tag endpoint cannot be used.
         """
 
-        tag = normalize_tag(
-            tag
-        )
+        tag = normalize_tag(tag)
 
         if not tag:
             return None
 
         if tag in self.tag_category_cache:
 
-            return self.tag_category_cache[
-                tag
-            ]
-
-        # ----------------------------------------------------
-        # First attempt: common Danbooru-style query
-        # ----------------------------------------------------
+            return self.tag_category_cache[tag]
 
         params = {
             "name": tag,
@@ -863,83 +743,116 @@ class SakugabooruClient:
 
                     category = None
 
-        self.tag_category_cache[
-            tag
-        ] = category
+        self.tag_category_cache[tag] = category
 
         return category
 
+
     # ========================================================
-    # ARTIST TAG CHECK
+    # ANIMATOR POSTS
     # ========================================================
 
-    async def is_artist_tag(
+    async def get_animator_posts(
         self,
-        tag: str,
-    ) -> bool:
+        animator_name,
+        limit=100,
+    ):
         """
-        Determine whether a tag should be treated as an
-        animator/artist.
+        Search Sakugabooru for an exact tag.
 
-        IMPORTANT:
+        Example:
 
-        KFSL is never consulted here.
+            Yutaka Nakamura
+                    ↓
+            yutaka_nakamura
+                    ↓
+            /post.json?tags=yutaka_nakamura
         """
 
         tag = normalize_tag(
-            tag
+            animator_name
         )
+
+        if not tag:
+            return []
+
+        if tag in self.animator_cache:
+
+            return self.animator_cache[tag]
+
+        posts = await self.get_posts(
+            page=1,
+            limit=limit,
+            tags=tag,
+        )
+
+        video_posts = [
+            post
+            for post in posts
+            if is_video_post(post)
+        ]
+
+        self.animator_cache[tag] = video_posts
+
+        return video_posts
+
+
+    # ========================================================
+    # VERIFY ANIMATOR
+    # ========================================================
+
+    async def verify_animator(
+        self,
+        candidate,
+    ):
+        """
+        Final animator verification.
+
+        A candidate is accepted when:
+
+        1. It looks like a person-name tag.
+        2. Sakugabooru has usable video posts for the tag.
+
+        If the tag API works and explicitly says category 1,
+        that is also accepted as artist confirmation.
+
+        IMPORTANT:
+        KFSL is not used.
+        """
+
+        if not candidate:
+            return False
+
+        if isinstance(
+            candidate,
+            str,
+        ):
+
+            tag = normalize_tag(
+                candidate
+            )
+
+        else:
+
+            tag = normalize_tag(
+                candidate.get(
+                    "tag",
+                    candidate.get(
+                        "name",
+                        "",
+                    ),
+                )
+            )
 
         if not tag:
             return False
 
-        if tag in self.artist_tag_cache:
-
-            return self.artist_tag_cache[
-                tag
-            ]
-
-        if not looks_like_name(
-            tag
-        ):
-
-            self.artist_tag_cache[
-                tag
-            ] = False
-
+        # Basic filter.
+        if not looks_like_name(tag):
             return False
 
         # ----------------------------------------------------
-        # Preferred verification: Sakugabooru tag category
-        # ----------------------------------------------------
-
-        category = await self.get_tag_info(
-            tag
-        )
-
-        if category is not None:
-
-            result = (
-                category == ARTIST_CATEGORY
-            )
-
-            self.artist_tag_cache[
-                tag
-            ] = result
-
-            return result
-
-        # ----------------------------------------------------
-        # Fallback
-        # ----------------------------------------------------
-        #
-        # If Sakugabooru's tag endpoint does not work,
-        # DON'T automatically trust every two-word tag.
-        #
-        # We require a real video search result.
-        #
-        # The candidate has already passed the strong
-        # name-like filter above.
+        # Get actual video posts.
         # ----------------------------------------------------
 
         posts = await self.get_animator_posts(
@@ -947,13 +860,191 @@ class SakugabooruClient:
             limit=100,
         )
 
-        result = len(posts) > 0
+        if not posts:
 
-        self.artist_tag_cache[
-            tag
-        ] = result
+            return False
+
+        # ----------------------------------------------------
+        # Artist category.
+        # ----------------------------------------------------
+        #
+        # If the tag API explicitly identifies the tag as an
+        # artist, that's strong confirmation.
+        #
+        # If the tag API is unavailable, the usable-video
+        # result above remains our fallback.
+        # ----------------------------------------------------
+
+        category = await self.get_tag_info(tag)
+
+        if category == ARTIST_CATEGORY:
+
+            self.artist_tag_cache[tag] = True
+
+            return True
+
+        if category is not None:
+
+            # Sakugabooru explicitly says it is another
+            # category, so don't call it an animator.
+            self.artist_tag_cache[tag] = False
+
+            return False
+
+        # ----------------------------------------------------
+        # Tag API unavailable.
+        #
+        # Since we already found actual Sakugabooru video
+        # posts for this exact name-like tag, accept it.
+        # ----------------------------------------------------
+
+        self.artist_tag_cache[tag] = True
+
+        return True
+
+
+    # ========================================================
+    # IS ARTIST TAG
+    # ========================================================
+
+    async def is_artist_tag(
+        self,
+        tag: str,
+    ) -> bool:
+
+        tag = normalize_tag(tag)
+
+        if not tag:
+            return False
+
+        if tag in self.artist_tag_cache:
+
+            return self.artist_tag_cache[tag]
+
+        if not looks_like_name(tag):
+
+            self.artist_tag_cache[tag] = False
+
+            return False
+
+        # ----------------------------------------------------
+        # Get exact posts first.
+        # ----------------------------------------------------
+
+        posts = await self.get_animator_posts(
+            tag,
+            limit=100,
+        )
+
+        if not posts:
+
+            self.artist_tag_cache[tag] = False
+
+            return False
+
+        # ----------------------------------------------------
+        # Check category.
+        # ----------------------------------------------------
+
+        category = await self.get_tag_info(tag)
+
+        if category is not None:
+
+            result = (
+                category == ARTIST_CATEGORY
+            )
+
+        else:
+
+            # Tag API unavailable.
+            # Actual usable videos become fallback.
+            result = True
+
+        self.artist_tag_cache[tag] = result
 
         return result
+
+
+    # ========================================================
+    # FIND ANIMATOR
+    # ========================================================
+
+    async def find_animator(
+        self,
+        tags,
+    ):
+        """
+        Find an animator from tags attached to a post.
+        """
+
+        if not tags:
+            return None
+
+        candidates = []
+
+        for raw_tag in tags:
+
+            tag = normalize_tag(
+                raw_tag
+            )
+
+            if not looks_like_name(tag):
+                continue
+
+            candidates.append(tag)
+
+        if not candidates:
+            return None
+
+        random.shuffle(candidates)
+
+        for tag in candidates:
+
+            try:
+
+                valid = await self.verify_animator(
+                    {
+                        "tag": tag,
+                    }
+                )
+
+            except Exception as e:
+
+                print(
+                    "Animator verification error:",
+                    tag,
+                    e,
+                )
+
+                valid = False
+
+            if not valid:
+                continue
+
+            return {
+                "name": normalize_name(tag),
+                "tag": tag,
+            }
+
+        return None
+
+
+    # ========================================================
+    # FIND ANIME
+    # ========================================================
+
+    async def find_anime(
+        self,
+        tags,
+    ):
+        """
+        Compatibility function.
+
+        Tournament selection does not use anime tags.
+        """
+
+        return None
+
 
     # ========================================================
     # RANDOM POST
@@ -989,15 +1080,11 @@ class SakugabooruClient:
         if not posts:
             return None
 
-        random.shuffle(
-            posts
-        )
+        random.shuffle(posts)
 
         for post in posts:
 
-            if not is_video_post(
-                post
-            ):
+            if not is_video_post(post):
                 continue
 
             if minimum_score is not None:
@@ -1022,142 +1109,6 @@ class SakugabooruClient:
 
         return None
 
-    # ========================================================
-    # ANIMATOR POSTS
-    # ========================================================
-
-    async def get_animator_posts(
-        self,
-        animator_name,
-        limit=100,
-    ):
-        """
-        Search for an exact Sakugabooru tag.
-
-        Example:
-
-            Yutaka Nakamura
-                    ↓
-            yutaka_nakamura
-                    ↓
-            post.json?tags=yutaka_nakamura
-        """
-
-        tag = normalize_tag(
-            animator_name
-        )
-
-        if not tag:
-            return []
-
-        if tag in self.animator_cache:
-
-            return self.animator_cache[
-                tag
-            ]
-
-        posts = await self.get_posts(
-            page=1,
-            limit=limit,
-            tags=tag,
-        )
-
-        video_posts = [
-            post
-            for post in posts
-            if is_video_post(post)
-        ]
-
-        self.animator_cache[
-            tag
-        ] = video_posts
-
-        return video_posts
-
-    # ========================================================
-    # FIND ANIMATOR
-    # ========================================================
-
-    async def find_animator(
-        self,
-        tags,
-    ):
-        """
-        Find an animator from a post.
-
-        ONLY Sakugabooru is used.
-
-        Anime tags are never intentionally selected.
-        """
-
-        if not tags:
-            return None
-
-        candidates = []
-
-        for raw_tag in tags:
-
-            tag = normalize_tag(
-                raw_tag
-            )
-
-            if not looks_like_name(
-                tag
-            ):
-                continue
-
-            candidates.append(
-                tag
-            )
-
-        if not candidates:
-            return None
-
-        random.shuffle(
-            candidates
-        )
-
-        for tag in candidates:
-
-            if not await self.is_artist_tag(
-                tag
-            ):
-                continue
-
-            posts = await self.get_animator_posts(
-                tag,
-                limit=100,
-            )
-
-            if not posts:
-                continue
-
-            return {
-                "name": normalize_name(
-                    tag
-                ),
-                "tag": tag,
-            }
-
-        return None
-
-    # ========================================================
-    # FIND ANIME
-    # ========================================================
-
-    async def find_anime(
-        self,
-        tags,
-    ):
-        """
-        Compatibility function.
-
-        IMPORTANT:
-
-        Tournament selection does NOT use anime tags.
-        """
-
-        return None
 
     # ========================================================
     # DISCOVER ANIMATORS
@@ -1168,20 +1119,8 @@ class SakugabooruClient:
         pages=30,
     ):
         """
-        Discover candidate artists from actual Sakugabooru
-        video posts.
-
-        Pipeline:
-
-            video post
-                ↓
-            post tags
-                ↓
-            preliminary name filter
-                ↓
-            Sakugabooru artist category
-                ↓
-            usable video verification
+        Discover candidate artist tags from actual
+        Sakugabooru video posts.
         """
 
         pages = max(
@@ -1194,10 +1133,6 @@ class SakugabooruClient:
 
         candidates = {}
 
-        # ----------------------------------------------------
-        # Random pages
-        # ----------------------------------------------------
-
         page_numbers = list(
             range(
                 1,
@@ -1205,12 +1140,10 @@ class SakugabooruClient:
             )
         )
 
-        random.shuffle(
-            page_numbers
-        )
+        random.shuffle(page_numbers)
 
         # ----------------------------------------------------
-        # Collect tags
+        # DISCOVER TAGS
         # ----------------------------------------------------
 
         for page in page_numbers:
@@ -1225,41 +1158,26 @@ class SakugabooruClient:
 
             for post in posts:
 
-                if not is_video_post(
-                    post
-                ):
+                if not is_video_post(post):
                     continue
 
-                tags = extract_tags(
-                    post
-                )
+                tags = extract_tags(post)
 
                 for tag in tags:
 
-                    if not looks_like_name(
-                        tag
-                    ):
+                    if not looks_like_name(tag):
                         continue
 
                     if tag not in candidates:
 
-                        candidates[
-                            tag
-                        ] = {
-                            "name": normalize_name(
-                                tag
-                            ),
-
+                        candidates[tag] = {
+                            "name": normalize_name(tag),
                             "tag": tag,
-
                             "quality": 0.0,
-
                             "post_count": 0,
                         }
 
-                    candidates[
-                        tag
-                    ]["post_count"] += 1
+                    candidates[tag]["post_count"] += 1
 
                     try:
 
@@ -1274,48 +1192,36 @@ class SakugabooruClient:
 
                         score = 0.0
 
-                    if score > candidates[
-                        tag
-                    ]["quality"]:
+                    if score > candidates[tag]["quality"]:
 
-                        candidates[
-                            tag
-                        ]["quality"] = score
+                        candidates[tag]["quality"] = score
 
         if not candidates:
             return []
-
-        # ----------------------------------------------------
-        # Candidate order
-        # ----------------------------------------------------
 
         candidate_list = list(
             candidates.values()
         )
 
-        random.shuffle(
-            candidate_list
-        )
+        random.shuffle(candidate_list)
 
         # ----------------------------------------------------
-        # Verify candidates
+        # VERIFY
         # ----------------------------------------------------
 
         verified = []
 
         for candidate in candidate_list:
 
-            tag = candidate.get(
-                "tag"
-            )
+            tag = candidate.get("tag")
 
             if not tag:
                 continue
 
             try:
 
-                is_artist = await self.is_artist_tag(
-                    tag
+                valid = await self.verify_animator(
+                    candidate
                 )
 
             except Exception as e:
@@ -1326,32 +1232,19 @@ class SakugabooruClient:
                     e,
                 )
 
-                is_artist = False
+                valid = False
 
-            if not is_artist:
-                continue
-
-            posts = await self.get_animator_posts(
-                tag,
-                limit=100,
-            )
-
-            if not posts:
+            if not valid:
                 continue
 
             verified.append(
                 {
-                    "name": normalize_name(
-                        tag
-                    ),
-
+                    "name": normalize_name(tag),
                     "tag": tag,
-
                     "quality": candidate.get(
                         "quality",
                         0,
                     ),
-
                     "post_count": candidate.get(
                         "post_count",
                         0,
@@ -1360,6 +1253,7 @@ class SakugabooruClient:
             )
 
         return verified
+
 
     # ========================================================
     # CHOOSE BATTLE ANIMATORS
@@ -1370,21 +1264,16 @@ class SakugabooruClient:
         count,
     ):
         """
-        Choose tournament participants.
+        Select random animators for a tournament.
 
-        SOURCE:
+        Source:
+            Sakugabooru only.
 
-            Sakugabooru
+        KFSL:
+            NOT USED.
 
-        NOT:
-
-            KFSL
-            anime database
-            anime tags
-
-        KFSL can be used elsewhere in your project for
-        optional animator information, but it is completely
-        absent from tournament selection.
+        Anime database:
+            NOT USED.
         """
 
         if count < 2:
@@ -1397,7 +1286,6 @@ class SakugabooruClient:
         # DISCOVERY
         # ----------------------------------------------------
 
-        # More pages = better candidate pool.
         discovery_pages = max(
             30,
             min(
@@ -1420,7 +1308,7 @@ class SakugabooruClient:
             return []
 
         # ----------------------------------------------------
-        # REMOVE DUPLICATES
+        # UNIQUE TAGS
         # ----------------------------------------------------
 
         unique = {}
@@ -1444,13 +1332,7 @@ class SakugabooruClient:
         )
 
         # ----------------------------------------------------
-        # WEIGHTED RANDOM
-        # ----------------------------------------------------
-        #
-        # We don't simply choose the highest-score names.
-        #
-        # A higher-quality animator gets a small advantage,
-        # while the tournament remains random.
+        # WEIGHTS
         # ----------------------------------------------------
 
         for candidate in candidates:
@@ -1489,21 +1371,18 @@ class SakugabooruClient:
                 100.0,
             )
 
-            # Small bonus for having multiple clips.
             clip_bonus = min(
                 post_count,
                 20,
             ) * 0.5
 
-            candidate[
-                "_weight"
-            ] = (
+            candidate["_weight"] = (
                 quality_weight
                 + clip_bonus
             )
 
         # ----------------------------------------------------
-        # SELECT
+        # RANDOM SELECTION
         # ----------------------------------------------------
 
         selected = []
@@ -1534,13 +1413,9 @@ class SakugabooruClient:
                 k=1,
             )[0]
 
-            selected.append(
-                candidate
-            )
+            selected.append(candidate)
 
-            remaining.remove(
-                candidate
-            )
+            remaining.remove(candidate)
 
         # ----------------------------------------------------
         # FINAL VERIFICATION
@@ -1550,9 +1425,7 @@ class SakugabooruClient:
 
         for candidate in selected:
 
-            tag = candidate.get(
-                "tag"
-            )
+            tag = candidate.get("tag")
 
             if not tag:
                 continue
@@ -1578,12 +1451,8 @@ class SakugabooruClient:
 
             verified.append(
                 {
-                    "name": normalize_name(
-                        tag
-                    ),
-
+                    "name": normalize_name(tag),
                     "tag": tag,
-
                     "quality": candidate.get(
                         "quality",
                         0,
@@ -1592,11 +1461,7 @@ class SakugabooruClient:
             )
 
         # ----------------------------------------------------
-        # IF RANDOM SELECTION LOST CANDIDATES
-        # ----------------------------------------------------
-        #
-        # Fill remaining slots from the rest of the verified
-        # pool.
+        # FILL REMAINING SLOTS
         # ----------------------------------------------------
 
         if len(verified) < count:
@@ -1609,9 +1474,8 @@ class SakugabooruClient:
             fallback_candidates = [
                 candidate
                 for candidate in candidates
-                if candidate.get(
-                    "tag"
-                ) not in selected_tags
+                if candidate.get("tag")
+                not in selected_tags
             ]
 
             random.shuffle(
@@ -1623,34 +1487,34 @@ class SakugabooruClient:
                 if len(verified) >= count:
                     break
 
+                tag = candidate.get("tag")
+
+                if not tag:
+                    continue
+
                 try:
 
                     valid = await self.verify_animator(
                         candidate
                     )
 
-                except Exception:
+                except Exception as e:
+
+                    print(
+                        "Fallback animator verification error:",
+                        tag,
+                        e,
+                    )
 
                     valid = False
 
                 if not valid:
                     continue
 
-                tag = candidate.get(
-                    "tag"
-                )
-
-                if not tag:
-                    continue
-
                 verified.append(
                     {
-                        "name": normalize_name(
-                            tag
-                        ),
-
+                        "name": normalize_name(tag),
                         "tag": tag,
-
                         "quality": candidate.get(
                             "quality",
                             0,
@@ -1658,7 +1522,14 @@ class SakugabooruClient:
                     }
                 )
 
+        # ----------------------------------------------------
+        # FINAL RANDOMIZATION
+        # ----------------------------------------------------
+
+        random.shuffle(verified)
+
         return verified[:count]
+
 
     # ========================================================
     # BATTLE CLIP
@@ -1688,7 +1559,7 @@ class SakugabooruClient:
         )
 
         # ----------------------------------------------------
-        # CONTINUOUS MODE
+        # CONTINUOUS
         # ----------------------------------------------------
 
         if (
@@ -1699,7 +1570,7 @@ class SakugabooruClient:
             return previous_clip
 
         # ----------------------------------------------------
-        # GET POSTS
+        # POSTS
         # ----------------------------------------------------
 
         posts = await self.get_animator_posts(
@@ -1708,14 +1579,11 @@ class SakugabooruClient:
         )
 
         if not posts:
-
             return previous_clip
 
         posts = posts.copy()
 
-        random.shuffle(
-            posts
-        )
+        random.shuffle(posts)
 
         used_by_animator = (
             self.animator_clips.get(
@@ -1725,14 +1593,12 @@ class SakugabooruClient:
         )
 
         # ----------------------------------------------------
-        # FIND NEW CLIP
+        # NEW CLIP
         # ----------------------------------------------------
 
         for post in posts:
 
-            url = post_url(
-                post
-            )
+            url = post_url(post)
 
             if not url:
                 continue
@@ -1745,20 +1611,14 @@ class SakugabooruClient:
 
             clip = {
                 "url": url,
-
-                "id": post.get(
-                    "id"
-                ),
-
+                "id": post.get("id"),
                 "score": post.get(
                     "score",
                     0,
                 ),
-
                 "file_ext": post.get(
                     "file_ext"
                 ),
-
                 "tags": post.get(
                     "tags",
                     post.get(
@@ -1768,17 +1628,13 @@ class SakugabooruClient:
                 ),
             }
 
-            used_by_animator.add(
-                url
-            )
+            used_by_animator.add(url)
 
             self.animator_clips[
                 animator_key
             ] = used_by_animator
 
-            self.used_clips.add(
-                url
-            )
+            self.used_clips.add(url)
 
             self.last_clips[
                 animator_key
@@ -1787,18 +1643,17 @@ class SakugabooruClient:
             return clip
 
         # ----------------------------------------------------
-        # FALLBACK
+        # NO NEW CLIP
         # ----------------------------------------------------
 
         return previous_clip
+
 
     # ========================================================
     # RESET
     # ========================================================
 
-    def reset(
-        self,
-    ):
+    def reset(self):
 
         self.used_clips.clear()
 
@@ -1812,13 +1667,12 @@ class SakugabooruClient:
 
         self.artist_tag_cache.clear()
 
+
     # ========================================================
     # CLOSE
     # ========================================================
 
-    async def close(
-        self,
-    ):
+    async def close(self):
 
         if (
             self.session is not None
@@ -1829,17 +1683,17 @@ class SakugabooruClient:
 
         self.session = None
 
+
     # ========================================================
     # CONTEXT MANAGER
     # ========================================================
 
-    async def __aenter__(
-        self,
-    ):
+    async def __aenter__(self):
 
         await self.get_session()
 
         return self
+
 
     async def __aexit__(
         self,
