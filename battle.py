@@ -12,22 +12,25 @@ class Animator:
 
     name: str
 
-    # Optional metadata from Sakugabooru.
-    # This is NOT displayed as the anime name.
-    popularity: float = 0.0
-
+    # Sakugabooru clip used by the current battle.
     current_clip: Optional[dict] = None
 
     wins: int = 0
     losses: int = 0
     battles: int = 0
 
+    # Sakugabooru popularity / quality.
+    popularity: float = 0.0
+
     def reset(self):
 
         self.current_clip = None
+
         self.wins = 0
         self.losses = 0
         self.battles = 0
+
+        self.popularity = 0.0
 
 
 # ============================================================
@@ -92,32 +95,13 @@ class Match:
 class AnimatorBattle:
 
     """
-    Single-elimination animator tournament.
+    Tournament manager.
 
-    IMPORTANT:
-    This class controls tournament progression only.
+    Important:
+    match_queue contains ONLY matches that have not started yet.
 
-    Sakugabooru searching is handled by sakugabooru.py.
-
-    A 2-person battle:
-        Match 1
-        -> winner
-        -> champion
-        -> STOP
-
-    A 4-person battle:
-        Match 1
-        Match 2
-        -> Final
-        -> champion
-
-    An 8-person battle:
-        4 quarterfinals
-        -> 2 semifinals
-        -> final
-
-    This intentionally avoids the old broken losers-bracket
-    logic which could continue indefinitely.
+    get_next_match() removes the next match from the queue.
+    This prevents the same match from being processed repeatedly.
     """
 
     def __init__(
@@ -131,16 +115,6 @@ class AnimatorBattle:
                 "At least 2 animators are required."
             )
 
-        if len(animators) not in (
-            2,
-            4,
-            8,
-            16,
-        ):
-            raise ValueError(
-                "Battle size must be 2, 4, 8 or 16."
-            )
-
         if mode not in (
             "random",
             "continuous",
@@ -152,35 +126,26 @@ class AnimatorBattle:
         self.animators = animators
         self.mode = mode
 
-        # Match numbering.
         self.match_counter = 0
 
-        # Current stage.
         self.phase = "Not Started"
 
-        # Active match.
         self.current_match: Optional[Match] = None
 
-        # Matches waiting to be played.
         self.match_queue: list[Match] = []
 
-        # Completed matches.
         self.completed_matches: list[Match] = []
 
-        # Current round winners.
         self.winners: list[Animator] = []
 
-        # Compatibility fields.
         self.losers: list[Animator] = []
+
         self.eliminated: list[Animator] = []
 
-        # Champion.
         self.champion: Optional[Animator] = None
 
-        # Stop flag.
         self.stopped = False
 
-        # Tournament started.
         self.started = False
 
     # ========================================================
@@ -224,7 +189,7 @@ class AnimatorBattle:
             return []
 
         if self.started:
-            return self.next_matches()
+            return self.get_pending_matches()
 
         self.started = True
 
@@ -236,17 +201,8 @@ class AnimatorBattle:
 
         self.winners.clear()
         self.losers.clear()
-        self.eliminated.clear()
+
         self.match_queue.clear()
-        self.completed_matches.clear()
-
-        # Reset participant statistics.
-        for animator in participants:
-            animator.reset()
-
-        # ----------------------------------------------------
-        # Create first round.
-        # ----------------------------------------------------
 
         while len(participants) >= 2:
 
@@ -262,14 +218,25 @@ class AnimatorBattle:
             if match:
                 self.match_queue.append(match)
 
-        # Should never happen because battle sizes are powers
-        # of two, but keep this safe.
+        # Odd participant advances automatically.
         if participants:
+
             self.winners.append(
                 participants[0]
             )
 
-        return self.next_matches()
+        return self.get_pending_matches()
+
+    # ========================================================
+    # PENDING MATCHES
+    # ========================================================
+
+    def get_pending_matches(self):
+
+        if self.stopped:
+            return []
+
+        return self.match_queue.copy()
 
     # ========================================================
     # NEXT MATCHES
@@ -280,7 +247,7 @@ class AnimatorBattle:
         if self.stopped:
             return []
 
-        return self.match_queue.copy()
+        return self.get_pending_matches()
 
     # ========================================================
     # GET NEXT MATCH
@@ -294,15 +261,16 @@ class AnimatorBattle:
         if self.current_match is not None:
             return self.current_match
 
-        if self.match_queue:
+        if not self.match_queue:
+            return None
 
-            self.current_match = (
-                self.match_queue.pop(0)
-            )
+        # IMPORTANT:
+        # Remove the match from the queue.
+        match = self.match_queue.pop(0)
 
-            return self.current_match
+        self.current_match = match
 
-        return None
+        return match
 
     # ========================================================
     # MANUAL NEXT MATCH
@@ -328,54 +296,71 @@ class AnimatorBattle:
         if match.completed:
             return False
 
-        if winner not in (
-            match.animator_a,
-            match.animator_b,
+        if (
+            self.current_match is not None
+            and match.match_id != self.current_match.match_id
         ):
             raise ValueError(
-                "Winner must be one of the match participants."
+                "This is not the current battle match."
             )
 
         match.set_result(winner)
 
         loser = match.loser
 
-        self.completed_matches.append(
-            match
-        )
-
-        # ----------------------------------------------------
-        # Current round winner.
-        # ----------------------------------------------------
-
-        self.winners.append(
-            winner
-        )
-
-        if loser is not None:
-            self.eliminated.append(
-                loser
+        if loser is None:
+            raise RuntimeError(
+                "Match has no loser."
             )
 
+        self.completed_matches.append(match)
+
         # ----------------------------------------------------
-        # Clear current match.
+        # WINNERS
+        # ----------------------------------------------------
+
+        if match.bracket == "Winners":
+
+            self.winners.append(winner)
+
+            self.losers.append(loser)
+
+        # ----------------------------------------------------
+        # LOSERS
+        # ----------------------------------------------------
+
+        elif match.bracket == "Losers":
+
+            self.losers.append(winner)
+
+            self.eliminate(loser)
+
+        # ----------------------------------------------------
+        # GRAND FINAL
+        # ----------------------------------------------------
+
+        elif match.bracket == "Grand Final":
+
+            self.champion = winner
+
+            self.phase = "Finished"
+
+        # ----------------------------------------------------
+        # Clear active match
         # ----------------------------------------------------
 
         self.current_match = None
 
         # ----------------------------------------------------
-        # If other matches in this same round remain,
-        # DO NOT create the next round yet.
+        # Build next stage ONLY after the queue is empty.
         # ----------------------------------------------------
 
-        if self.match_queue:
-            return True
+        if (
+            self.phase != "Finished"
+            and not self.match_queue
+        ):
 
-        # ----------------------------------------------------
-        # Current round is completely finished.
-        # ----------------------------------------------------
-
-        self.prepare_next_round()
+            self.prepare_next_round()
 
         return True
 
@@ -388,42 +373,92 @@ class AnimatorBattle:
         if self.stopped:
             return
 
-        if self.champion is not None:
-            self.phase = "Finished"
+        # Never create a new stage while matches remain.
+        if self.match_queue:
             return
 
         # ----------------------------------------------------
-        # IMPORTANT:
-        #
-        # If exactly ONE animator remains, that animator is
-        # champion.
-        #
-        # This is what fixes the endless Match 459 issue.
+        # WINNERS BRACKET
+        # ----------------------------------------------------
+
+        if len(self.winners) >= 2:
+
+            self.build_winners_round()
+
+            return
+
+        # ----------------------------------------------------
+        # ONE WINNER + LOSERS
+        # ----------------------------------------------------
+
+        if (
+            len(self.winners) == 1
+            and len(self.losers) >= 2
+        ):
+
+            self.build_losers_round()
+
+            return
+
+        # ----------------------------------------------------
+        # LOSERS
+        # ----------------------------------------------------
+
+        if len(self.losers) >= 2:
+
+            self.build_losers_round()
+
+            return
+
+        # ----------------------------------------------------
+        # GRAND FINAL
+        # ----------------------------------------------------
+
+        if (
+            len(self.winners) == 1
+            and len(self.losers) == 1
+        ):
+
+            winners_champion = self.winners[0]
+            losers_champion = self.losers[0]
+
+            self.winners.clear()
+            self.losers.clear()
+
+            self.phase = "Grand Final"
+
+            match = self.create_match(
+                winners_champion,
+                losers_champion,
+                "Grand Final",
+            )
+
+            if match:
+                self.match_queue.append(match)
+
+            return
+
+        # ----------------------------------------------------
+        # CHAMPION
         # ----------------------------------------------------
 
         if len(self.winners) == 1:
 
             self.champion = self.winners[0]
+
             self.phase = "Finished"
 
-            return
+    # ========================================================
+    # WINNERS ROUND
+    # ========================================================
 
-        # ----------------------------------------------------
-        # Need at least two winners to create another round.
-        # ----------------------------------------------------
+    def build_winners_round(self):
+
+        if self.stopped:
+            return []
 
         if len(self.winners) < 2:
-
-            self.phase = "Finished"
-
-            if self.winners:
-                self.champion = self.winners[0]
-
-            return
-
-        # ----------------------------------------------------
-        # Build next single-elimination round.
-        # ----------------------------------------------------
+            return []
 
         participants = self.winners.copy()
 
@@ -431,7 +466,7 @@ class AnimatorBattle:
 
         random.shuffle(participants)
 
-        self.match_queue.clear()
+        matches = []
 
         while len(participants) >= 2:
 
@@ -445,22 +480,88 @@ class AnimatorBattle:
             )
 
             if match:
+
+                matches.append(match)
+
                 self.match_queue.append(match)
 
-        # Safety for odd counts.
         if participants:
+
             self.winners.append(
                 participants[0]
             )
 
-        remaining = len(
-            self.match_queue
-        )
+        self.phase = "Winners Bracket"
 
-        if remaining == 1:
-            self.phase = "Final"
-        else:
-            self.phase = "Next Round"
+        return matches
+
+    # ========================================================
+    # LOSERS ROUND
+    # ========================================================
+
+    def build_losers_round(self):
+
+        if self.stopped:
+            return []
+
+        if len(self.losers) < 2:
+            return []
+
+        participants = self.losers.copy()
+
+        self.losers.clear()
+
+        random.shuffle(participants)
+
+        matches = []
+
+        while len(participants) >= 2:
+
+            animator_a = participants.pop(0)
+            animator_b = participants.pop(0)
+
+            match = self.create_match(
+                animator_a,
+                animator_b,
+                "Losers",
+            )
+
+            if match:
+
+                matches.append(match)
+
+                self.match_queue.append(match)
+
+        if participants:
+
+            self.losers.append(
+                participants[0]
+            )
+
+        self.phase = "Losers Bracket"
+
+        return matches
+
+    # ========================================================
+    # ELIMINATE
+    # ========================================================
+
+    def eliminate(
+        self,
+        animator: Animator,
+    ):
+
+        if animator not in self.eliminated:
+
+            self.eliminated.append(animator)
+
+        if animator in self.winners:
+
+            self.winners.remove(animator)
+
+        if animator in self.losers:
+
+            self.losers.remove(animator)
 
     # ========================================================
     # FINISHED
@@ -516,6 +617,7 @@ class AnimatorBattle:
         self.started = False
 
         for animator in self.animators:
+
             animator.reset()
 
     # ========================================================
@@ -529,9 +631,7 @@ class AnimatorBattle:
 
             "phase": self.phase,
 
-            "animators": len(
-                self.animators
-            ),
+            "animators": len(self.animators),
 
             "completed_matches": len(
                 self.completed_matches
@@ -547,6 +647,10 @@ class AnimatorBattle:
 
             "winners_remaining": len(
                 self.winners
+            ),
+
+            "losers_remaining": len(
+                self.losers
             ),
 
             "champion": (
@@ -574,18 +678,17 @@ class AnimatorBattle:
 
             "bracket": match.bracket,
 
-            "animator_a":
-                match.animator_a.name,
+            "animator_a": (
+                match.animator_a.name
+            ),
 
-            "animator_b":
-                match.animator_b.name,
+            "animator_b": (
+                match.animator_b.name
+            ),
 
-            "votes_a":
-                match.votes_a,
+            "votes_a": match.votes_a,
 
-            "votes_b":
-                match.votes_b,
+            "votes_b": match.votes_b,
 
-            "completed":
-                match.completed,
+            "completed": match.completed,
         }
