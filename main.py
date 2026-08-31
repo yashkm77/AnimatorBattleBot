@@ -628,10 +628,10 @@ async def run_tournament(
 
 @bot.tree.command(
     name="battle",
-    description="Start an animator battle.",
+    description="Start a single-elimination animator tournament.",
 )
 @app_commands.describe(
-    rounds="Number of animators (2, 4, 8 or 16)",
+    rounds="Tournament rounds: 1=2 animators, 2=4, 3=8, 4=16",
     mode="Clip mode",
 )
 @app_commands.choices(
@@ -648,29 +648,22 @@ async def run_tournament(
 )
 async def battle_command(
     interaction: discord.Interaction,
-    rounds: app_commands.Range[int, 2, 16],
+    rounds: app_commands.Range[int, 1, 4],
     mode: app_commands.Choice[str],
 ):
 
     guild_id = interaction.guild_id
 
     # ========================================================
-    # BRACKET SIZE
+    # CALCULATE TOURNAMENT SIZE
     # ========================================================
 
-    if rounds not in (
-        2,
-        4,
-        8,
-        16,
-    ):
+    # 1 round  = 2 animators
+    # 2 rounds = 4 animators
+    # 3 rounds = 8 animators
+    # 4 rounds = 16 animators
 
-        await interaction.response.send_message(
-            "❌ Choose **2, 4, 8, or 16** animators.",
-            ephemeral=True,
-        )
-
-        return
+    animator_count = 2 ** rounds
 
     # ========================================================
     # ACTIVE BATTLE
@@ -701,11 +694,15 @@ async def battle_command(
         "KFSL animator database...**"
     )
 
+    # ========================================================
+    # SELECT ANIMATORS
+    # ========================================================
+
     try:
 
         selected = (
             await sakuga.choose_battle_animators(
-                rounds
+                animator_count
             )
         )
 
@@ -719,13 +716,15 @@ async def battle_command(
             "❌ Failed to select animators."
         )
 
+        sakuga.reset()
+
         return
 
     # ========================================================
-    # NOT ENOUGH
+    # NOT ENOUGH ANIMATORS
     # ========================================================
 
-    if len(selected) < rounds:
+    if len(selected) < animator_count:
 
         sakuga.reset()
 
@@ -733,10 +732,17 @@ async def battle_command(
             f"❌ I could only find "
             f"**{len(selected)}** verified animators "
             f"with usable Sakugabooru clips, "
-            f"but the battle needs **{rounds}**."
+            f"but this tournament needs "
+            f"**{animator_count}** animators."
         )
 
         return
+
+    # ========================================================
+    # USE EXACT NUMBER
+    # ========================================================
+
+    selected = selected[:animator_count]
 
     # ========================================================
     # CREATE ANIMATORS
@@ -762,40 +768,32 @@ async def battle_command(
         )
 
     # ========================================================
-    # TOURNAMENT
+    # CREATE TOURNAMENT
     # ========================================================
 
     tournament = AnimatorBattle(
         animators,
+        rounds=rounds,
         mode=mode.value,
     )
-
-    tournament.stopped = False
 
     bot.active_battles[
         guild_id
     ] = tournament
 
     # ========================================================
-    # NO SPOILER PARTICIPANT LIST
-    # ========================================================
-
-    await interaction.channel.send(
-        "👥 **Battle participants**\n"
-        f"**{rounds} animators have entered the "
-        f"battle. Their names will be revealed "
-        f"when they fight.**"
-    )
-
-    # ========================================================
     # START MESSAGE
     # ========================================================
 
     await interaction.channel.send(
-        "⚔️ **ANIMATOR BATTLE STARTING!**\n\n"
-        f"👥 **{rounds} hidden animators**\n"
+        "⚔️ **ANIMATOR TOURNAMENT STARTING!**\n\n"
+        f"🏆 **{rounds} tournament rounds**\n"
+        f"👥 **{animator_count} animators**\n"
         f"🎬 **{mode.name}**\n"
-        f"⏱️ **{VOTE_TIME} seconds**\n\n"
+        f"⏱️ **{VOTE_TIME} seconds per match**\n\n"
+        "❗ **Single elimination:**\n"
+        "Lose once → eliminated.\n"
+        "Win → advance to the next round.\n\n"
         "Get ready..."
     )
 
@@ -821,7 +819,7 @@ async def battle_command(
 
         await interaction.channel.send(
             "❌ Something went wrong during "
-            "the animator battle.\n"
+            "the animator tournament.\n"
             f"```{e}```"
         )
 
